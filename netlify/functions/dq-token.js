@@ -73,12 +73,14 @@ export default async (req) => {
     // CIPHER_USER_ID env var maps the DQ Clerk user to the correct Cipher blob key.
     const blobUserId = process.env.CIPHER_USER_ID || dqUserId;
 
-    // Try both blob naming patterns Cipher may have used
+    // Tokens are stored in crm-tokens/tokens/{userId}.json
     let tokenData;
     try {
-      tokenData = await readBlob(`hs-token--${blobUserId}.json`);
-    } catch {
-      tokenData = await readBlob(`tokens--${blobUserId}.json`);
+      tokenData = await readBlob(`tokens/${blobUserId}.json`);
+    } catch (e) {
+      // Fallback to old naming patterns just in case
+      try { tokenData = await readBlob(`hs-token--${blobUserId}.json`); }
+      catch { tokenData = await readBlob(`tokens--${blobUserId}.json`); }
     }
 
     // Refresh if expired (with 60s buffer)
