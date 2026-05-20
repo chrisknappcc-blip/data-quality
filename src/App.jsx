@@ -922,41 +922,52 @@ function ExportPanel({ scanResult }) {
 
   const d = new Date().toISOString().slice(0,10)
   const EXPORTS = [
-    { type:'field-updates', icon:'📥', label:'Field Updates',
-      desc:'Imports directly into HubSpot. Covers company_type, parent_system_name, primary_outreach_rep, vendor tags, and all auto-fixable field updates.',
-      action:'HubSpot → Settings → Import → select file', primary:true, filename:`cipher-dq-field-updates-${d}.csv` },
+    { type:'company-updates', icon:'🏢', label:'Company Updates',
+      desc:'Import directly into HubSpot to update company_type, parent_system_name, domain, and vendor tags. Headers auto-map — no manual column mapping needed.',
+      action:'HubSpot → Contacts → Import → Companies', primary:true,
+      filename:`cipher-dq-company-updates-${d}.csv` },
+    { type:'contact-updates', icon:'👤', label:'Contact Updates',
+      desc:'Import directly into HubSpot to update primary_outreach_rep, target_persona, and primary_entity. Headers auto-map — no manual column mapping needed.',
+      action:'HubSpot → Contacts → Import → Contacts', primary:true,
+      filename:`cipher-dq-contact-updates-${d}.csv` },
     { type:'merge-list', icon:'🔀', label:'Merge List',
-      desc:'Duplicate company pairs to merge. Open each in HubSpot → Actions → Merge.',
-      action:'Manual action in HubSpot UI', filename:`cipher-dq-merge-list-${d}.csv` },
+      desc:'Duplicate company pairs to merge manually. Open each primary record in HubSpot → Actions → Merge.',
+      action:'Manual — HubSpot UI merge tool',
+      filename:`cipher-dq-merge-list-${d}.csv` },
     { type:'parent-child', icon:'🌳', label:'Parent/Child Associations',
-      desc:'Subsidiaries needing a parent company set. Open each record → Company Information → Parent Company.',
-      action:'Manual action in HubSpot UI', filename:`cipher-dq-parent-child-${d}.csv` },
-    { type:'vendor-list', icon:'🚫', label:'Vendor Review List',
-      desc:'Companies and contacts flagged as vendors. Review before tagging — included in Field Updates once confirmed.',
-      action:'Review then import', filename:`cipher-dq-vendors-${d}.csv` },
-    { type:'phase3-full', icon:'👤', label:'Contact Issues',
-      desc:'All contact data issues — missing personas, reps, phones, emails, domain mismatches.',
-      action:'Review + import to HubSpot', filename:`cipher-dq-contacts-${d}.csv` },
+      desc:'Subsidiaries that need a Parent Company set. Open each child record → About → Company Information → Parent Company.',
+      action:'Manual — HubSpot UI per record',
+      filename:`cipher-dq-parent-child-${d}.csv` },
+    { type:'vendor-list', icon:'🚫', label:'Vendor Review',
+      desc:'Companies flagged as vendors. Review this list — confirmed vendors are already included in the Company Updates import.',
+      action:'Review before importing Company Updates',
+      filename:`cipher-dq-vendor-review-${d}.csv` },
+    { type:'phase3-full', icon:'📋', label:'Contact Issues (Full List)',
+      desc:'All contact data issues — missing personas, reps, phones, domain mismatches. Use as a working reference.',
+      action:'Review — auto-fixable items are already in Contact Updates',
+      filename:`cipher-dq-contact-issues-${d}.csv` },
     { type:'email-repair', icon:'📧', label:'Email Repair Targets',
-      desc:'Contacts with bounced or missing emails. Priority list for ZoomInfo lookup.',
-      action:'ZoomInfo enrichment or manual research', filename:`cipher-dq-email-repair-${d}.csv` },
-    { type:'stale', icon:'🕰', label:'Stale Records',
-      desc:'Accounts sorted by days since last activity.',
-      action:'Review and assign follow-up actions', filename:`cipher-dq-stale-${d}.csv` },
+      desc:'Contacts with bounced or missing emails. Priority list for ZoomInfo lookup or manual research.',
+      action:'ZoomInfo enrichment or manual research',
+      filename:`cipher-dq-email-repair-${d}.csv` },
+    { type:'stale', icon:'🕰', label:'Activity Status',
+      desc:'All Gold accounts sorted by days since last activity. Includes both stale and active — filter on Activity Status column.',
+      action:'Review and assign follow-up tasks',
+      filename:`cipher-dq-activity-status-${d}.csv` },
   ]
 
   return (
     <Card>
       <CardHead right={
         <Btn variant="primary" disabled={!scanResult||downloadingAll} onClick={downloadAll}>
-          {downloadingAll ? '⟳ Downloading all…' : '⬇ Download All (7 files)'}
+          {downloadingAll ? '⟳ Downloading all…' : '⬇ Download All (8 files)'}
         </Btn>
       }>Downloads & Exports</CardHead>
       <div style={{ padding:16, display:'flex', flexDirection:'column', gap:8 }}>
         <Callout type="info">
-          The Field Updates file is the only one that imports directly into HubSpot.
-          Everything else (merges, parent/child associations) requires a manual action in HubSpot.
-          Review all files before taking action.
+          The two import files (Company Updates, Contact Updates) go directly into HubSpot with no manual adjustments.
+          Column headers are set to exact HubSpot property labels so auto-mapping works on import.
+          Everything else is for review or manual action.
         </Callout>
         {EXPORTS.map(exp => (
           <div key={exp.type} style={{ display:'flex', alignItems:'center', gap:14, padding:'12px 14px',
