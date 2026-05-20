@@ -1,11 +1,13 @@
 // ─── Cipher Data Quality — Company Enrichment ────────────────────────────────
-// Uses Claude + web search to verify company hierarchy with ~1% error target.
-// Five accuracy mechanisms:
-//   1. Pre-seeded merger/rebrand knowledge for known recent changes
-//   2. Two targeted searches per company (current status + merger check)
-//   3. Verification pass confirming proposed parent exists
-//   4. Source citation requirement — no high confidence without evidence
-//   5. Stale name detection — flags if current search returns different name
+// Target: 99%+ accuracy on company name, type, and parent system.
+//
+// Accuracy stack (checked in order, first match wins):
+//   1. User corrections (Azure Blob) — user-verified, highest priority
+//   2. Hardcoded known changes — pre-verified facts for major systems
+//   3. Two-pass Claude + web search with trade publication targeting
+//      Pass 1: Current status search
+//      Pass 2: Merger/rebrand search on authoritative sources only
+//      Both passes required before returning any result
 
 const CORS = {
   "Content-Type": "application/json",
@@ -14,73 +16,172 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// ─── Pre-seeded knowledge: known recent mergers/rebrandings (2022–2025) ───────
-// These are verified facts seeded into the prompt so Claude doesn't have to
-// discover them from scratch. Update this list as new mergers are confirmed.
-const KNOWN_RECENT_CHANGES = `
-VERIFIED HEALTH SYSTEM CHANGES (2022–2025) — treat these as ground truth:
+const ACCOUNT   = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+const SAS_TOKEN = process.env.AZURE_STORAGE_SAS_TOKEN;
+const CONTAINER = process.env.AZURE_STORAGE_CONTAINER || "crm-tokens";
 
-REBRANDINGS / NAME CHANGES:
-- Edward-Elmhurst Health → now "Endeavor Health" (merged with NorthShore University HealthSystem, rebranded December 2023). Parent system. Domain: endeavorhealth.com
-- NorthShore University HealthSystem → now part of "Endeavor Health" (same merger, December 2023)
-- Advocate Aurora Health → now part of "Advocate Health" (merged with Atrium Health, completed December 2022). Advocate Health is the parent. Domain: advocatehealth.com
-- Atrium Health → now part of "Advocate Health" (same merger). Subsidiary/regional brand under Advocate Health.
-- Partners HealthCare → rebranded to "Mass General Brigham" (2020, still operating under this name in 2025)
+// ─── Layer 1: User corrections from Azure Blob ────────────────────────────────
+async function loadUserCorrections() {
+  try {
+    const sas = SAS_TOKEN.startsWith("?") ? SAS_TOKEN : `?${SAS_TOKEN}`;
+    const url = `https://${ACCOUNT}.blob.core.windows.net/${CONTAINER}/dq-corrections.json${sas}`;
+    const res = await fetch(url);
+    if (res.status === 404) return [];
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.corrections || [];
+  } catch {
+    return [];
+  }
+}
 
-ACQUISITIONS (organization still operates under original name but has new parent):
-- Geisinger → acquired by Risant Health (closed March 31, 2024). Risant Health was created by Kaiser Permanente. Geisinger retains its name and brand but parent_system_name = "Risant Health"
-- Cone Health → acquired by Risant Health (2024). Retains name, parent = "Risant Health"
-- Ascension Illinois hospitals → sold to Prime Healthcare (2024)
-- CHI Franciscan → part of CommonSpirit Health (ongoing, no name change)
-- Dignity Health → part of CommonSpirit Health (ongoing)
-- MercyOne → joint operating company of Trinity Health and Mayo Clinic, now majority Trinity Health
+function matchCorrection(corrections, companyName) {
+  const nameLower = companyName.toLowerCase();
+  return corrections.find(c =>
+    nameLower.includes(c.companyNameLower) ||
+    c.companyNameLower.includes(nameLower)
+  ) || null;
+}
 
-MERGERS IN PROGRESS / ANNOUNCED:
-- Sanford Health + Marshfield Clinic Health System → merger announced 2024, pending completion
-- Allegheny Health Network + Heritage Valley Health System → affiliation agreement 2024
+// ─── Layer 2: Hardcoded known changes ─────────────────────────────────────────
+// Pre-verified facts. Only covers what we already know with certainty.
+// For anything not here, we search.
+const KNOWN_CHANGES = [
+  {
+    match: ["edward-elmhurst", "edward elmhurst"],
+    currentName: "Endeavor Health", nameChanged: true,
+    previousName: "Edward-Elmhurst Health",
+    company_type: "Parent System", parent_system_name: null,
+    notes: "Merged with NorthShore University HealthSystem and rebranded as Endeavor Health in December 2023. Third largest health system in Illinois.",
+    recentChanges: "Merged with NorthShore, rebranded to Endeavor Health (December 2023).",
+    evidenceUrl: "https://www.prnewswire.com/news-releases/northshore--edward-elmhurst-health-is-now-endeavor-health-302006318.html",
+  },
+  {
+    match: ["northshore university healthsystem", "northshore university health"],
+    currentName: "Endeavor Health", nameChanged: true,
+    previousName: "NorthShore University HealthSystem",
+    company_type: "Parent System", parent_system_name: null,
+    notes: "Merged with Edward-Elmhurst Health and rebranded as Endeavor Health in December 2023.",
+    recentChanges: "Merged with Edward-Elmhurst Health, rebranded to Endeavor Health (December 2023).",
+    evidenceUrl: "https://www.prnewswire.com/news-releases/northshore--edward-elmhurst-health-is-now-endeavor-health-302006318.html",
+  },
+  {
+    match: ["advocate aurora"],
+    currentName: "Advocate Aurora Health", nameChanged: false,
+    company_type: "Subsidiary/Hospital", parent_system_name: "Advocate Health",
+    notes: "Advocate Aurora Health merged with Atrium Health in December 2022 forming Advocate Health as the parent system.",
+    recentChanges: "Merged with Atrium Health to form Advocate Health (December 2022).",
+    evidenceUrl: "https://www.advocatehealth.com",
+  },
+  {
+    match: ["atrium health"],
+    currentName: "Atrium Health", nameChanged: false,
+    company_type: "Subsidiary/Hospital", parent_system_name: "Advocate Health",
+    notes: "Atrium Health merged with Advocate Aurora Health in December 2022. Advocate Health is the parent system.",
+    recentChanges: "Merged with Advocate Aurora Health to form Advocate Health (December 2022).",
+    evidenceUrl: "https://www.advocatehealth.com",
+  },
+  {
+    match: ["geisinger"],
+    currentName: "Geisinger", nameChanged: false,
+    company_type: "Subsidiary/Hospital", parent_system_name: "Risant Health",
+    notes: "Geisinger was acquired by Risant Health (created by Kaiser Permanente) on March 31, 2024. Retains its name and brand.",
+    recentChanges: "Acquired by Risant Health (Kaiser Permanente subsidiary) on March 31, 2024.",
+    evidenceUrl: "https://www.geisinger.org/about-geisinger/news-and-media/news-releases/2024/04/02/15/07/risant-health-completes-acquisition-of-geisinger",
+  },
+  {
+    match: ["chi franciscan"],
+    currentName: "CHI Franciscan", nameChanged: false,
+    company_type: "Subsidiary/Hospital", parent_system_name: "CommonSpirit Health",
+    notes: "CHI Franciscan is a regional subsidiary of CommonSpirit Health.",
+    recentChanges: null,
+    evidenceUrl: "https://www.commonspirit.org",
+  },
+  {
+    match: ["dignity health"],
+    currentName: "Dignity Health", nameChanged: false,
+    company_type: "Subsidiary/Hospital", parent_system_name: "CommonSpirit Health",
+    notes: "Dignity Health is a regional subsidiary of CommonSpirit Health.",
+    recentChanges: null,
+    evidenceUrl: "https://www.commonspirit.org",
+  },
+  {
+    match: ["mercyone"],
+    currentName: "MercyOne", nameChanged: false,
+    company_type: "Subsidiary/Hospital", parent_system_name: "Trinity Health",
+    notes: "MercyOne is a joint operating company, majority owned by Trinity Health.",
+    recentChanges: null,
+    evidenceUrl: "https://www.mercyone.org",
+  },
+];
 
-DO NOT ASSUME these unless search confirms: any merger not on this list.
-`;
+function checkKnownChanges(companyName) {
+  const nameLower = companyName.toLowerCase();
+  const match = KNOWN_CHANGES.find(e =>
+    e.match.some(pattern => nameLower.includes(pattern))
+  );
+  if (!match) return null;
+  return {
+    currentName:        match.currentName,
+    nameChanged:        match.nameChanged || false,
+    previousName:       match.previousName || null,
+    company_type:       match.company_type,
+    parent_system_name: match.parent_system_name,
+    notes:              match.notes,
+    recentChanges:      match.recentChanges,
+    evidenceUrl:        match.evidenceUrl,
+    confidence:         "high",
+    source:             "Verified known change",
+  };
+}
 
-// ─── Claude API call with web search ─────────────────────────────────────────
+// ─── Layer 3: Two-pass Claude + web search ────────────────────────────────────
+// Pass 1: Current status — what is this organization today?
+// Pass 2: Merger check — search authoritative trade sources specifically
+// Both passes run. Pass 2 can override Pass 1 if it finds evidence of a change.
 async function researchCompany(company) {
-  const prompt = `You are a healthcare industry analyst verifying CRM data for a sales team.
-Your job is to research this health system and return VERIFIED, ACCURATE information.
-Accuracy is critical — this data will be imported into a production CRM.
 
-COMPANY TO RESEARCH:
-Name in CRM: "${company.name}"
-Domain: ${company.domain || "unknown"}
-Current company_type in CRM: ${company.company_type || "not set"}
-Current parent_system_name in CRM: ${company.parent_system_name || "not set"}
+  const AUTHORITATIVE_SOURCES = [
+    "site:modernhealthcare.com",
+    "site:healthcaredive.com",
+    "site:beckershospitalreview.com",
+    "site:prnewswire.com",
+    "site:businesswire.com",
+    "site:fiercehealthcare.com",
+  ].join(" OR ");
 
-${KNOWN_RECENT_CHANGES}
+  const prompt = `You are verifying healthcare organization data for a production CRM. Accuracy is critical.
 
-INSTRUCTIONS:
-1. Search for "${company.name}" current status 2024 2025 to find the latest information
-2. Search for "${company.name}" merger OR acquisition OR rebrand OR "now known as" 2022 2023 2024 2025
-3. If you find a parent organization, search to verify it exists and is correct
-4. Check if the name in our CRM is still the current name, or if the organization has rebranded
+COMPANY TO RESEARCH: "${company.name}"
+Domain in CRM: ${company.domain || "unknown"}
+Contacts in CRM: ${company.contacts || 0}
+Current company_type: ${company.company_type || "not set"}
+Current parent_system_name: ${company.parent_system_name || "not set"}
 
-CRITICAL RULES:
-- If the organization appears in the KNOWN RECENT CHANGES list above, use that as ground truth
-- Only return "high" confidence if you found direct evidence (press release, news article, official website)
-- If you cannot find clear evidence for parent/type, return "low" confidence and explain why
-- Never return "Independent" with high confidence for a large health system without searching first
-- A health system with 5+ hospitals is almost certainly a "Parent System" not "Independent"
-- If the current name differs from what's in our CRM, set nameChanged: true
+YOU MUST RUN EXACTLY THESE TWO SEARCHES — both are required:
 
-RESPOND WITH ONLY a JSON object — no markdown, no explanation, just the JSON:
+SEARCH 1: "${company.name}" current status 2024 2025
+SEARCH 2: "${company.name}" merger OR acquisition OR rebrand OR "now known as" OR "formerly" (${AUTHORITATIVE_SOURCES})
+
+RULES FOR YOUR ANSWER:
+- Search 2 uses authoritative trade publications. If they report a merger or rebrand, that is ground truth.
+- If Search 2 finds a press release on prnewswire.com or businesswire.com about a name change, set nameChanged: true and use the new name.
+- A system with ${company.contacts || 0} contacts is almost certainly NOT Independent — research carefully before returning Independent.
+- Only return confidence "high" if you found a direct source URL. Otherwise return "medium" or "low".
+- If the two searches conflict, trust Search 2 (trade publications) over Search 1.
+- Do NOT return information from before 2022 as current fact.
+
+RESPOND WITH ONLY this JSON — no markdown, no explanation:
 {
-  "currentName": "the current official name as of 2025",
+  "currentName": "official name as of 2025",
   "nameChanged": true or false,
-  "previousName": "the old name if changed, otherwise null",
-  "company_type": "Parent System" or "Subsidiary/Hospital" or "Medical Group" or "Independent" or "Vendor/Supplier",
-  "parent_system_name": "name of parent system, or null if this IS the parent or is truly independent",
+  "previousName": "old name if changed, otherwise null",
+  "company_type": "Parent System" or "Subsidiary/Hospital" or "Medical Group" or "Independent",
+  "parent_system_name": "parent system name or null",
   "confidence": "high" or "medium" or "low",
-  "evidenceUrl": "URL of the source that confirms your answer, or null",
-  "notes": "1-2 sentence plain English summary of current status",
-  "recentChanges": "description of any mergers/acquisitions/rebrandings since 2022, or null if none found"
+  "evidenceUrl": "URL from Search 2 that supports your answer, or null",
+  "notes": "plain English summary in 1-2 sentences",
+  "recentChanges": "description of any changes since 2022, or null"
 }`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -95,39 +196,35 @@ RESPOND WITH ONLY a JSON object — no markdown, no explanation, just the JSON:
   });
 
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Claude API ${response.status}: ${err.slice(0, 200)}`);
+    const e = await response.text();
+    throw new Error(`Claude API ${response.status}: ${e.slice(0, 200)}`);
   }
 
   const data = await response.json();
-
-  // Extract text blocks (may follow tool_use blocks)
   let text = "";
   for (const block of (data.content || [])) {
     if (block.type === "text") text += block.text;
   }
 
-  // Parse JSON
   const clean = text.replace(/```json|```/g, "").trim();
   const match = clean.match(/\{[\s\S]*\}/);
   if (!match) throw new Error(`No JSON in response: ${clean.slice(0, 200)}`);
 
   const result = JSON.parse(match[0]);
 
-  // Safety check: downgrade confidence if no evidence URL
+  // Safety: downgrade confidence if no evidence URL
   if (result.confidence === "high" && !result.evidenceUrl) {
     result.confidence = "medium";
-    result.notes = (result.notes || "") + " (Confidence downgraded: no source URL provided)";
+    result.notes = (result.notes || "") + " (Confidence downgraded — no source URL returned)";
   }
 
-  // Safety check: large health systems shouldn't be Independent
-  const name = (company.name || "").toLowerCase();
-  const contacts = company.contacts || 0;
-  if (result.company_type === "Independent" && contacts > 20) {
+  // Safety: large contact counts shouldn't be Independent
+  if (result.company_type === "Independent" && (company.contacts || 0) > 20) {
     result.confidence = "low";
-    result.notes = (result.notes || "") + " (Review: large contact count suggests this may not be independent)";
+    result.notes = (result.notes || "") + ` (Review: ${company.contacts} contacts — unlikely to be Independent)`;
   }
 
+  result.source = "Claude + web search (two-pass)";
   return result;
 }
 
@@ -140,22 +237,61 @@ export default async (req) => {
     const { companies, batchStart = 0, batchSize = 8 } = await req.json();
     if (!companies?.length) return new Response(JSON.stringify({ error: "companies array required" }), { status: 400, headers: CORS });
 
-    // Smaller batches (8 instead of 10) to stay within Netlify's 26s timeout
-    // Each company does 2-3 web searches + response parsing = ~3-4s each
+    // Load user corrections once per batch
+    const userCorrections = await loadUserCorrections();
+    console.log(`[dq-enrich] loaded ${userCorrections.length} user corrections`);
+
     const batch = companies.slice(batchStart, batchStart + batchSize);
     const results = [];
 
     console.log(`[dq-enrich] batch ${batchStart}–${batchStart + batch.length} of ${companies.length}`);
 
     for (const company of batch) {
-      console.log(`[dq-enrich] researching: ${company.name}`);
-      try {
-        const research = await researchCompany(company);
+      console.log(`[dq-enrich] processing: ${company.name}`);
+      let research = null;
+      let resolvedBy = null;
 
+      try {
+        // Layer 1: user corrections
+        const userCorrection = matchCorrection(userCorrections, company.name);
+        if (userCorrection) {
+          research = {
+            currentName:        userCorrection.currentName || company.name,
+            nameChanged:        userCorrection.nameChanged || false,
+            previousName:       null,
+            company_type:       userCorrection.company_type || null,
+            parent_system_name: userCorrection.parent_system_name || null,
+            notes:              userCorrection.notes || null,
+            recentChanges:      userCorrection.recentChanges || null,
+            evidenceUrl:        userCorrection.evidenceUrl || null,
+            confidence:         "high",
+            source:             `User verified (added by ${userCorrection.addedBy} on ${userCorrection.addedAt?.slice(0,10)})`,
+          };
+          resolvedBy = "user_correction";
+          console.log(`[dq-enrich] ✓ user correction: ${company.name}`);
+        }
+
+        // Layer 2: hardcoded known changes
+        if (!research) {
+          const known = checkKnownChanges(company.name);
+          if (known) {
+            research = known;
+            resolvedBy = "known_change";
+            console.log(`[dq-enrich] ✓ known change: ${company.name}`);
+          }
+        }
+
+        // Layer 3: two-pass Claude search
+        if (!research) {
+          research = await researchCompany(company);
+          resolvedBy = "web_search";
+          console.log(`[dq-enrich] ✓ web search: ${company.name} → ${research.confidence} confidence`);
+        }
+
+        // Build output
         const flags = [];
         const fieldUpdates = [];
 
-        // Name changed?
         if (research.nameChanged && research.currentName &&
             research.currentName.toLowerCase() !== company.name.toLowerCase()) {
           flags.push({
@@ -167,7 +303,6 @@ export default async (req) => {
           });
         }
 
-        // company_type update?
         if (research.company_type && research.company_type !== (company.company_type || "")) {
           fieldUpdates.push({
             field: "company_type",
@@ -176,7 +311,6 @@ export default async (req) => {
           });
         }
 
-        // parent_system_name update?
         if (research.parent_system_name && research.parent_system_name !== (company.parent_system_name || "")) {
           fieldUpdates.push({
             field: "parent_system_name",
@@ -185,65 +319,50 @@ export default async (req) => {
           });
         }
 
-        // Recent changes flag?
         if (research.recentChanges) {
-          flags.push({
-            type: "RECENT_CHANGE",
-            severity: "medium",
-            message: research.recentChanges,
-          });
+          flags.push({ type: "RECENT_CHANGE", severity: "medium", message: research.recentChanges });
         }
 
         results.push({
-          companyId:    company.id,
-          companyName:  company.name,
-          tier:         company.tier,
-          domain:       company.domain,
-          contacts:     company.contacts,
-          url:          company.url,
-          research,
-          fieldUpdates,
-          flags,
-          hasIssues:    flags.length > 0 || fieldUpdates.length > 0,
-          confidence:   research.confidence,
-          source:       "Claude + web search",
-          enrichedAt:   new Date().toISOString(),
+          companyId: company.id, companyName: company.name,
+          tier: company.tier, domain: company.domain,
+          contacts: company.contacts, url: company.url,
+          research, fieldUpdates, flags,
+          hasIssues:  flags.length > 0 || fieldUpdates.length > 0,
+          confidence: research.confidence,
+          resolvedBy,
+          enrichedAt: new Date().toISOString(),
         });
 
       } catch (err) {
         console.error(`[dq-enrich] failed: ${company.name}:`, err.message);
         results.push({
-          companyId:    company.id,
-          companyName:  company.name,
-          error:        err.message,
-          fieldUpdates: [],
-          flags:        [],
-          hasIssues:    false,
-          confidence:   "error",
-          source:       "Research failed",
+          companyId: company.id, companyName: company.name,
+          error: err.message, fieldUpdates: [], flags: [],
+          hasIssues: false, confidence: "error", resolvedBy: "error",
         });
       }
 
-      // Gap between calls to avoid API rate limits
-      await new Promise(r => setTimeout(r, 800));
+      // Only delay if we made an API call
+      if (resolvedBy === "web_search") await new Promise(r => setTimeout(r, 800));
     }
 
     const nextBatch = batchStart + batchSize;
     const hasMore   = nextBatch < companies.length;
 
     return new Response(JSON.stringify({
-      results,
-      batchStart,
+      results, batchStart,
       batchEnd:  batchStart + batch.length,
       total:     companies.length,
       hasMore,
       nextBatch: hasMore ? nextBatch : null,
       summary: {
         processed:     results.length,
+        fromUser:      results.filter(r => r.resolvedBy === "user_correction").length,
+        fromKnown:     results.filter(r => r.resolvedBy === "known_change").length,
+        fromSearch:    results.filter(r => r.resolvedBy === "web_search").length,
         withIssues:    results.filter(r => r.hasIssues).length,
         nameChanges:   results.flatMap(r => r.flags||[]).filter(f => f.type === "NAME_CHANGED").length,
-        recentChanges: results.flatMap(r => r.flags||[]).filter(f => f.type === "RECENT_CHANGE").length,
-        highConf:      results.filter(r => r.confidence === "high").length,
         errors:        results.filter(r => r.error).length,
       },
     }), { status: 200, headers: CORS });
