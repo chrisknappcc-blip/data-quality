@@ -218,29 +218,227 @@ function Phase1Panel({ data, approved, onApprove }) {
 }
 
 // ─── Phase 2 ─────────────────────────────────────────────────────────────────
-function Phase2Panel({ data, approved, onApprove }) {
+function Phase2Panel({ data, approved, onApprove, companies }) {
+  const [enriching, setEnriching]       = useState(false)
+  const [enrichResults, setEnrichResults] = useState([])
+  const [enrichProgress, setEnrichProgress] = useState('')
+  const [enrichDone, setEnrichDone]     = useState(false)
+  const [enrichError, setEnrichError]   = useState(null)
+
   if (!data) return null
   const { proposals, summary, analyzedCompanies } = data
+
+  const runEnrichment = async () => {
+    setEnriching(true)
+    setEnrichResults([])
+    setEnrichDone(false)
+    setEnrichError(null)
+
+    const allResults = []
+    const batchSize  = 10
+    let batchStart   = 0
+    const total      = companies.length
+
+    try {
+      while (batchStart < total) {
+        setEnrichProgress(`Researching ${batchStart + 1}–${Math.min(batchStart + batchSize, total)} of ${total} companies…`)
+        const res = await fetch('/api/dq-enrich', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companies, batchStart, batchSize }),
+        })
+        if (!res.ok) throw new Error('Enrichment request failed')
+        const data = await res.json()
+        allResults.push(...(data.results || []))
+        if (!data.hasMore) break
+        batchStart = data.nextBatch
+        // Small pause between batches
+        await new Promise(r => setTimeout(r, 1000))
+      }
+      setEnrichResults(allResults)
+      setEnrichDone(true)
+      setEnrichProgress('')
+    } catch (e) {
+      setEnrichError(e.message)
+      setEnrichProgress('')
+    } finally {
+      setEnriching(false)
+    }
+  }
+
+  const nameChanges   = enrichResults.flatMap(r => r.flags || []).filter(f => f.type === 'NAME_CHANGED')
+  const recentChanges = enrichResults.flatMap(r => r.flags || []).filter(f => f.type === 'RECENT_CHANGE')
+  const withUpdates   = enrichResults.filter(r => (r.fieldUpdates || []).length > 0)
 
   return (
     <Panel>
       <PHead right={<span style={{ fontSize:11, color:C.sub }}>{analyzedCompanies} analyzed · {proposals.length} proposals</span>}>
         Phase 2 — Parent/Subsidiary Hierarchy Mapping
       </PHead>
+
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, padding:12 }}>
         <KpiCard label="Total Proposals"    value={summary.total}              />
         <KpiCard label="High Confidence"    value={summary.highConfidence}     color={C.green} />
         <KpiCard label="CSV Exportable"     value={summary.csvExportable}      color={C.accent} />
         <KpiCard label="Need Association"   value={summary.requireAssociation} color={C.amber} />
       </div>
-      {summary.requireAssociation > 0 && (
-        <div style={{ padding:'0 12px 12px' }}>
-          <InfoBox color={C.purple}>
-            {summary.requireAssociation} companies need parent/child associations set in HubSpot UI after importing CSV.
-            Export the Parent/Child CSV for the list of manual actions.
-          </InfoBox>
+
+      {/* Enrichment section */}
+      <div style={{ padding:'0 12px 12px' }}>
+        <div style={{ padding:'12px', background:C.card, border:`1px solid ${C.border}`,
+          borderRadius:8, display:'flex', flexDirection:'column', gap:10 }}>
+          <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:12 }}>
+            <div>
+              <div style={{ fontSize:12, fontWeight:600, marginBottom:4 }}>
+                🔍 Live Research Enrichment
+              </div>
+              <div style={{ fontSize:11, color:C.sub, lineHeight:1.5 }}>
+                The static knowledge base above may be outdated. Run live research to verify current
+                names, detect recent mergers/acquisitions, and update hierarchy proposals with
+                real-time data from the web. Each company is researched individually via Claude + web search.
+              </div>
+              <div style={{ fontSize:10, color:C.muted, marginTop:4 }}>
+                ~{Math.ceil(companies.length / 10)} batches · ~{Math.ceil(companies.length * 2 / 60)} minutes · processes all {companies.length} companies
+              </div>
+            </div>
+            <Btn variant="primary" disabled={enriching} onClick={runEnrichment} style={{ flexShrink:0 }}>
+              {enriching ? 'Researching…' : enrichDone ? 'Re-run Research' : 'Run Live Research'}
+            </Btn>
+          </div>
+
+          {enriching && (
+            <div style={{ fontSize:12, color:C.accent, padding:'8px 0' }}>
+              ⟳ {enrichProgress}
+            </div>
+          )}
+
+          {enrichError && (
+            <div style={{ fontSize:11, color:C.red, padding:'6px 10px',
+              background:'rgba(240,82,82,.08)', borderRadius:6 }}>
+              ✗ {enrichError}
+            </div>
+          )}
+
+          {enrichDone && enrichResults.length > 0 && (
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {/* Summary */}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8 }}>
+                <KpiCard label="Researched"     value={enrichResults.length} />
+                <KpiCard label="Name Changes"   value={nameChanges.length}   color={nameChanges.length>0?C.red:C.green} />
+                <KpiCard label="Recent Changes" value={recentChanges.length} color={recentChanges.length>0?C.amber:C.green} />
+                <KpiCard label="Field Updates"  value={withUpdates.length}   color={C.accent} />
+              </div>
+
+              {/* Name changes — most important */}
+              {nameChanges.length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase',
+                    letterSpacing:'.06em', color:C.red, marginBottom:6 }}>
+                    ⚠ Outdated Company Names ({nameChanges.length})
+                  </div>
+                  {enrichResults.filter(r => r.flags?.some(f => f.type === 'NAME_CHANGED')).map((r,i) => {
+                    const flag = r.flags.find(f => f.type === 'NAME_CHANGED')
+                    return (
+                      <div key={i} style={{ padding:'10px 12px', background:'rgba(240,82,82,.06)',
+                        border:'1px solid rgba(240,82,82,.2)', borderRadius:8, marginBottom:6 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                          <div>
+                            <div style={{ fontSize:12, fontWeight:600, color:C.red }}>
+                              {flag.currentName} <span style={{ color:C.muted }}>→</span> {flag.correctName}
+                            </div>
+                            <div style={{ fontSize:11, color:C.sub, marginTop:3 }}>{r.research.notes}</div>
+                            {r.research.recentChanges && (
+                              <div style={{ fontSize:11, color:C.amber, marginTop:3 }}>
+                                Recent: {r.research.recentChanges}
+                              </div>
+                            )}
+                          </div>
+                          <a href={r.url} target="_blank" rel="noopener noreferrer"
+                            style={{ fontSize:11, color:C.accent, flexShrink:0, marginLeft:12 }}>
+                            Open →
+                          </a>
+                        </div>
+                        <div style={{ marginTop:8, display:'flex', gap:6, flexWrap:'wrap' }}>
+                          <Badge color={C.red} bg="rgba(240,82,82,.1)" border="rgba(240,82,82,.25)">
+                            UPDATE COMPANY NAME IN HUBSPOT
+                          </Badge>
+                          <Badge color={r.confidence==='high'?C.green:C.amber}
+                            bg={r.confidence==='high'?'rgba(52,201,122,.1)':'rgba(245,166,35,.1)'}
+                            border={r.confidence==='high'?'rgba(52,201,122,.25)':'rgba(245,166,35,.25)'}>
+                            {r.confidence} confidence
+                          </Badge>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Recent changes */}
+              {recentChanges.length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase',
+                    letterSpacing:'.06em', color:C.amber, marginBottom:6 }}>
+                    Recent Mergers / Acquisitions / Rebrandings ({recentChanges.length})
+                  </div>
+                  {enrichResults.filter(r => r.flags?.some(f => f.type === 'RECENT_CHANGE')).map((r,i) => {
+                    const flag = r.flags.find(f => f.type === 'RECENT_CHANGE')
+                    return (
+                      <div key={i} style={{ padding:'10px 12px', background:'rgba(245,166,35,.06)',
+                        border:'1px solid rgba(245,166,35,.2)', borderRadius:8, marginBottom:6,
+                        display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                        <div>
+                          <div style={{ fontSize:12, fontWeight:600 }}>{r.companyName}</div>
+                          <div style={{ fontSize:11, color:C.sub, marginTop:3 }}>{flag.message}</div>
+                        </div>
+                        <a href={r.url} target="_blank" rel="noopener noreferrer"
+                          style={{ fontSize:11, color:C.accent, flexShrink:0, marginLeft:12 }}>
+                          Open →
+                        </a>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Updated field proposals */}
+              {withUpdates.length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase',
+                    letterSpacing:'.06em', color:C.accent, marginBottom:6 }}>
+                    Updated Hierarchy Proposals ({withUpdates.length})
+                  </div>
+                  {withUpdates.map((r,i) => (
+                    <div key={i} style={{ padding:'8px 12px', background:C.bgCard||C.card,
+                      border:`1px solid ${C.border}`, borderRadius:8, marginBottom:4 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                        <span style={{ fontSize:12, fontWeight:500 }}>{r.companyName}</span>
+                        <ConfBadge confidence={r.confidence} />
+                      </div>
+                      {(r.fieldUpdates || []).map((u,j) => (
+                        <div key={j} style={{ display:'grid', gridTemplateColumns:'150px 1fr 1fr',
+                          gap:8, fontSize:11, marginBottom:3 }}>
+                          <span style={{ color:C.sub, fontFamily:'IBM Plex Mono' }}>{u.field}</span>
+                          <span style={{ color:C.muted }}>{u.currentValue || <em>empty</em>}</span>
+                          <span style={{ color:C.green }}>{u.proposedValue}</span>
+                        </div>
+                      ))}
+                      {r.research?.notes && (
+                        <div style={{ fontSize:10, color:C.muted, marginTop:4 }}>{r.research.notes}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <InfoBox color={C.accent}>
+                Export the Field Updates CSV after running research — it will include these verified proposals.
+                Name changes need to be updated manually in HubSpot (the company record name field isn't importable).
+              </InfoBox>
+            </div>
+          )}
         </div>
-      )}
+      </div>
       {proposals.length === 0
         ? <div style={{ padding:'16px 14px', color:C.sub, textAlign:'center' }}>✓ All companies already have hierarchy assigned</div>
         : proposals.map((p,i) => (
@@ -716,7 +914,7 @@ export default function App() {
                   </div>
                   <Phase0Panel data={scanResult.phase0} />
                   <Phase1Panel data={scanResult.phase1} approved={approved} onApprove={handleApprove} />
-                  <Phase2Panel data={scanResult.phase2} approved={approved} onApprove={handleApprove} />
+                  <Phase2Panel data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />
                   <Phase3Panel data={scanResult.phase3} />
                   <Phase4Panel data={scanResult.phase4} />
                   <ExportPanel scanResult={scanResult} />
@@ -724,7 +922,7 @@ export default function App() {
               )}
               {activePhase === '0' && <Phase0Panel data={scanResult.phase0} />}
               {activePhase === '1' && <Phase1Panel data={scanResult.phase1} approved={approved} onApprove={handleApprove} />}
-              {activePhase === '2' && <Phase2Panel data={scanResult.phase2} approved={approved} onApprove={handleApprove} />}
+              {activePhase === '2' && <Phase2Panel data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />}
               {activePhase === '3' && <Phase3Panel data={scanResult.phase3} />}
               {activePhase === '4' && <Phase4Panel data={scanResult.phase4} />}
               {activePhase === 'export' && <ExportPanel scanResult={scanResult} />}
