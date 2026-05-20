@@ -247,18 +247,39 @@ function Step2({ data, approved, onApprove, companies }) {
   if (!data) return null
   const { proposals, summary } = data
 
-  const runEnrichment = async () => {
-    setEnriching(true); setEnrichResults([]); setEnrichDone(false); setEnrichError(null)
-    const allResults = []; const batchSize = 10; let batchStart = 0
+  const [enrichCachedAt, setEnrichCachedAt] = useState(null)
+
+  const runEnrichment = async (forceRefresh = false) => {
+    setEnriching(true); setEnrichResults([]); setEnrichDone(false)
+    setEnrichError(null); setEnrichCachedAt(null)
+    const allResults = []; const batchSize = 8; let batchStart = 0
     try {
       while (batchStart < companies.length) {
-        setEnrichProgress(`Researching companies ${batchStart+1}–${Math.min(batchStart+batchSize, companies.length)} of ${companies.length}…`)
+        const isLastBatch = batchStart + batchSize >= companies.length
+        setEnrichProgress(
+          batchStart === 0 && !forceRefresh
+            ? `Checking cache…`
+            : `Researching companies ${batchStart+1}–${Math.min(batchStart+batchSize, companies.length)} of ${companies.length}…`
+        )
         const res = await fetch('/api/dq-enrich', {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ companies, batchStart, batchSize }),
+          body: JSON.stringify({
+            companies, batchStart, batchSize, forceRefresh,
+            // Pass accumulated results on final batch so server can write full cache
+            allResults: isLastBatch ? allResults : undefined,
+          }),
         })
         if (!res.ok) throw new Error('Research request failed')
         const d = await res.json()
+
+        // Cache hit — use cached results immediately
+        if (d.fromCache) {
+          setEnrichResults(d.results)
+          setEnrichCachedAt(d.cachedAt)
+          setEnrichDone(true); setEnrichProgress('')
+          return
+        }
+
         allResults.push(...(d.results||[]))
         if (!d.hasMore) break
         batchStart = d.nextBatch
@@ -301,13 +322,31 @@ function Step2({ data, approved, onApprove, companies }) {
                 {Math.ceil(companies.length/10)} batches · ~{Math.ceil(companies.length*2/60)} min · {companies.length} companies
               </div>
             </div>
-            <Btn variant="primary" disabled={enriching} onClick={runEnrichment}>
-              {enriching ? '⟳ Researching…' : enrichDone ? 'Re-run' : 'Run Research'}
-            </Btn>
+            <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
+              {enrichDone && enrichCachedAt && (
+                <span style={{ fontSize:10, color:C.muted }}>
+                  Cached {new Date(enrichCachedAt).toLocaleDateString()}
+                </span>
+              )}
+              {enrichDone && (
+                <Btn variant="ghost" disabled={enriching} onClick={() => runEnrichment(true)} small>
+                  Force refresh
+                </Btn>
+              )}
+              <Btn variant="primary" disabled={enriching} onClick={() => runEnrichment(false)}>
+                {enriching ? '⟳ Researching…' : enrichDone ? 'Re-run' : 'Run Research'}
+              </Btn>
+            </div>
           </div>
 
           {enriching && (
             <div style={{ marginTop:12, fontSize:12, color:C.accent }}>{enrichProgress}</div>
+          )}
+          {enrichDone && enrichCachedAt && (
+            <div style={{ marginTop:8, fontSize:11, color:C.green }}>
+              ✓ Loaded from cache — results from {new Date(enrichCachedAt).toLocaleString()}.
+              Hit "Force refresh" to run new research.
+            </div>
           )}
           {enrichError && (
             <div style={{ marginTop:10 }}><Callout type="error">{enrichError}</Callout></div>
