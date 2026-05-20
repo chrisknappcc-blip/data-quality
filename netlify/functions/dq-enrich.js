@@ -19,13 +19,64 @@ const CORS = {
 const ACCOUNT   = process.env.AZURE_STORAGE_ACCOUNT_NAME;
 const SAS_TOKEN = process.env.AZURE_STORAGE_SAS_TOKEN;
 const CONTAINER = process.env.AZURE_STORAGE_CONTAINER || "crm-tokens";
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// ─── Cache helpers ────────────────────────────────────────────────────────────
+function blobUrl(blobName) {
+  const sas = SAS_TOKEN.startsWith("?") ? SAS_TOKEN : `?${SAS_TOKEN}`;
+  return `https://${ACCOUNT}.blob.core.windows.net/${CONTAINER}/${blobName}${sas}`;
+}
+
+// Simple hash of company IDs to use as cache key
+function cacheKey(companies) {
+  const ids = companies.map(c => c.id).sort().join(",");
+  let hash = 0;
+  for (let i = 0; i < ids.length; i++) {
+    hash = ((hash << 5) - hash) + ids.charCodeAt(i);
+    hash |= 0;
+  }
+  return `dq-enrich-cache--${Math.abs(hash)}.json`;
+}
+
+async function readCache(key) {
+  try {
+    const res = await fetch(blobUrl(key));
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    const data = await res.json();
+    // Check TTL
+    if (!data.cachedAt || Date.now() - new Date(data.cachedAt).getTime() > CACHE_TTL_MS) {
+      console.log(`[dq-enrich] cache expired`);
+      return null;
+    }
+    return data;
+  } catch { return null; }
+}
+
+async function writeCache(key, results, companies) {
+  try {
+    const body = JSON.stringify({
+      cachedAt: new Date().toISOString(),
+      companyCount: companies.length,
+      results,
+    });
+    await fetch(blobUrl(key), {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "x-ms-blob-type": "BlockBlob",
+        "Content-Length": String(Buffer.byteLength(body)),
+      },
+      body,
+    });
+    console.log(`[dq-enrich] cache written: ${key}`);
+  } catch (e) { console.error(`[dq-enrich] cache write failed: ${e.message}`); }
+}
 
 // ─── Layer 1: User corrections from Azure Blob ────────────────────────────────
 async function loadUserCorrections() {
   try {
-    const sas = SAS_TOKEN.startsWith("?") ? SAS_TOKEN : `?${SAS_TOKEN}`;
-    const url = `https://${ACCOUNT}.blob.core.windows.net/${CONTAINER}/dq-corrections.json${sas}`;
-    const res = await fetch(url);
+    const res = await fetch(blobUrl("dq-corrections.json"));
     if (res.status === 404) return [];
     if (!res.ok) return [];
     const data = await res.json();
@@ -234,8 +285,39 @@ export default async (req) => {
   if (req.method !== "POST")   return new Response("Method not allowed", { status: 405, headers: CORS });
 
   try {
-    const { companies, batchStart = 0, batchSize = 8 } = await req.json();
+    const reqBody = await req.json();
+    const { companies, batchStart = 0, batchSize = 8, forceRefresh = false } = reqBody;
     if (!companies?.length) return new Response(JSON.stringify({ error: "companies array required" }), { status: 400, headers: CORS });
+
+    // ── Cache check — skip entire research if results are fresh ───────────────
+    // Only applies to full runs (batchStart === 0) not individual batches
+    const key = cacheKey(companies);
+    if (!forceRefresh && batchStart === 0) {
+      const cached = await readCache(key);
+      if (cached) {
+        console.log(`[dq-enrich] cache hit — returning ${cached.results.length} cached results`);
+        return new Response(JSON.stringify({
+          results:    cached.results,
+          batchStart: 0,
+          batchEnd:   cached.results.length,
+          total:      companies.length,
+          hasMore:    false,
+          nextBatch:  null,
+          fromCache:  true,
+          cachedAt:   cached.cachedAt,
+          summary: {
+            processed:     cached.results.length,
+            fromCache:     cached.results.length,
+            fromUser:      cached.results.filter(r => r.resolvedBy === "user_correction").length,
+            fromKnown:     cached.results.filter(r => r.resolvedBy === "known_change").length,
+            fromSearch:    cached.results.filter(r => r.resolvedBy === "web_search").length,
+            withIssues:    cached.results.filter(r => r.hasIssues).length,
+            nameChanges:   cached.results.flatMap(r => r.flags||[]).filter(f => f.type === "NAME_CHANGED").length,
+            errors:        cached.results.filter(r => r.error).length,
+          },
+        }), { status: 200, headers: CORS });
+      }
+    }
 
     // Load user corrections once per batch
     const userCorrections = await loadUserCorrections();
@@ -349,6 +431,13 @@ export default async (req) => {
 
     const nextBatch = batchStart + batchSize;
     const hasMore   = nextBatch < companies.length;
+
+    // On final batch, frontend passes allResults (all batches accumulated)
+    // so we can write the complete dataset to cache
+    if (!hasMore && reqBody.allResults?.length > 0) {
+      const fullResults = [...reqBody.allResults, ...results];
+      await writeCache(key, fullResults, companies);
+    }
 
     return new Response(JSON.stringify({
       results, batchStart,
