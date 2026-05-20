@@ -11,7 +11,7 @@ const CORS = {
 
 const ACCOUNT   = process.env.AZURE_STORAGE_ACCOUNT_NAME;
 const SAS_TOKEN = process.env.AZURE_STORAGE_SAS_TOKEN;
-const CONTAINER = "cipher-tokens";
+const CONTAINER = process.env.AZURE_STORAGE_CONTAINER || "crm-tokens";
 const HS_ID     = process.env.HUBSPOT_CLIENT_ID;
 const HS_SEC    = process.env.HUBSPOT_CLIENT_SECRET;
 
@@ -66,14 +66,24 @@ export default async (req) => {
   if (req.method !== "GET")    return new Response("Method not allowed", { status: 405, headers: CORS });
 
   try {
-    const userId = new URL(req.url).searchParams.get("userId");
-    if (!userId) return new Response(JSON.stringify({ error: "userId required" }), { status: 400, headers: CORS });
+    const dqUserId = new URL(req.url).searchParams.get("userId");
+    if (!dqUserId) return new Response(JSON.stringify({ error: "userId required" }), { status: 400, headers: CORS });
 
-    const tokenData = await readBlob(`hs-token--${userId}.json`);
+    // DQ uses a separate Clerk app so the user ID differs from Cipher's.
+    // CIPHER_USER_ID env var maps the DQ Clerk user to the correct Cipher blob key.
+    const blobUserId = process.env.CIPHER_USER_ID || dqUserId;
+
+    // Try both blob naming patterns Cipher may have used
+    let tokenData;
+    try {
+      tokenData = await readBlob(`hs-token--${blobUserId}.json`);
+    } catch {
+      tokenData = await readBlob(`tokens--${blobUserId}.json`);
+    }
 
     // Refresh if expired (with 60s buffer)
     if (!tokenData.access_token || Date.now() > (tokenData.expires_at - 60000)) {
-      const refreshed = await refreshHubSpotToken(userId, tokenData.refresh_token);
+      const refreshed = await refreshHubSpotToken(blobUserId, tokenData.refresh_token);
       return new Response(JSON.stringify({ token: refreshed.access_token }), { status: 200, headers: CORS });
     }
 
