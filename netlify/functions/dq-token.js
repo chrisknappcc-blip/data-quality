@@ -84,6 +84,8 @@ export default async (req) => {
       console.log(`[dq-token] trying blob path: ${blobPath}`);
       tokenData = await readBlob(blobPath);
       console.log(`[dq-token] found token, expires_at: ${tokenData.expires_at}`);
+      console.log(`[dq-token] token keys: ${Object.keys(tokenData).join(', ')}`);
+      if (tokenData.hubspot) console.log(`[dq-token] hubspot keys: ${Object.keys(tokenData.hubspot).join(', ')}`);
     } catch (e) {
       console.log(`[dq-token] primary path failed: ${e.message}`);
       try {
