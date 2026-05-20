@@ -853,6 +853,7 @@ function CorrectionsPanel() {
 // ─── Export Panel ─────────────────────────────────────────────────────────────
 function ExportPanel({ scanResult }) {
   const [exporting, setExporting] = useState({})
+  const [downloadingAll, setDownloadingAll] = useState(false)
 
   const doExport = async (type, filename) => {
     setExporting(p => ({...p,[type]:true}))
@@ -867,6 +868,17 @@ function ExportPanel({ scanResult }) {
       a.download = filename; a.click()
     } catch(e) { alert('Export error: ' + e.message) }
     finally { setExporting(p => ({...p,[type]:false})) }
+  }
+
+  const downloadAll = async () => {
+    setDownloadingAll(true)
+    try {
+      for (const exp of EXPORTS) {
+        await doExport(exp.type, exp.filename)
+        // Small gap between downloads so browser doesn't block them
+        await new Promise(r => setTimeout(r, 400))
+      }
+    } finally { setDownloadingAll(false) }
   }
 
   const d = new Date().toISOString().slice(0,10)
@@ -896,7 +908,11 @@ function ExportPanel({ scanResult }) {
 
   return (
     <Card>
-      <CardHead>Downloads & Exports</CardHead>
+      <CardHead right={
+        <Btn variant="primary" disabled={!scanResult||downloadingAll} onClick={downloadAll}>
+          {downloadingAll ? '⟳ Downloading all…' : '⬇ Download All (7 files)'}
+        </Btn>
+      }>Downloads & Exports</CardHead>
       <div style={{ padding:16, display:'flex', flexDirection:'column', gap:8 }}>
         <Callout type="info">
           The Field Updates file is the only one that imports directly into HubSpot.
