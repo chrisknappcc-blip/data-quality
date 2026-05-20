@@ -74,13 +74,25 @@ export default async (req) => {
     const blobUserId = process.env.CIPHER_USER_ID || dqUserId;
 
     // Tokens are stored in crm-tokens/tokens/{userId}.json
+    console.log(`[dq-token] looking up blob for userId: ${blobUserId}`);
+    console.log(`[dq-token] container: ${CONTAINER}`);
+    console.log(`[dq-token] account: ${ACCOUNT}`);
+
     let tokenData;
     try {
-      tokenData = await readBlob(`tokens/${blobUserId}.json`);
+      const blobPath = `tokens/${blobUserId}.json`;
+      console.log(`[dq-token] trying blob path: ${blobPath}`);
+      tokenData = await readBlob(blobPath);
+      console.log(`[dq-token] found token, expires_at: ${tokenData.expires_at}`);
     } catch (e) {
-      // Fallback to old naming patterns just in case
-      try { tokenData = await readBlob(`hs-token--${blobUserId}.json`); }
-      catch { tokenData = await readBlob(`tokens--${blobUserId}.json`); }
+      console.log(`[dq-token] primary path failed: ${e.message}`);
+      try {
+        tokenData = await readBlob(`hs-token--${blobUserId}.json`);
+        console.log(`[dq-token] found via hs-token-- pattern`);
+      } catch {
+        tokenData = await readBlob(`tokens--${blobUserId}.json`);
+        console.log(`[dq-token] found via tokens-- pattern`);
+      }
     }
 
     // Refresh if expired (with 60s buffer)
