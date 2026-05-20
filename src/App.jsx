@@ -652,6 +652,204 @@ function Step4({ data }) {
   )
 }
 
+// ─── Corrections Panel ────────────────────────────────────────────────────────
+function CorrectionsPanel() {
+  const [corrections, setCorrections] = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [saving, setSaving]           = useState(false)
+  const [showAdd, setShowAdd]         = useState(false)
+  const [form, setForm]               = useState({
+    companyName:'', currentName:'', nameChanged:false,
+    company_type:'', parent_system_name:'', notes:'',
+    recentChanges:'', evidenceUrl:'',
+  })
+
+  const COMPANY_TYPES = ['Parent System','Subsidiary/Hospital','Medical Group','Independent','Vendor/Supplier']
+
+  const loadCorrections = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/dq-corrections')
+      if (res.ok) { const d = await res.json(); setCorrections(d.corrections||[]) }
+    } catch(e) { console.error(e) }
+    finally { setLoading(false) }
+  }
+
+  useState(() => { loadCorrections() }, [])
+
+  const saveCorrection = async () => {
+    if (!form.companyName.trim()) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/dq-corrections', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ ...form, addedBy: 'admin' }),
+      })
+      if (res.ok) {
+        setShowAdd(false)
+        setForm({ companyName:'', currentName:'', nameChanged:false,
+          company_type:'', parent_system_name:'', notes:'',
+          recentChanges:'', evidenceUrl:'' })
+        await loadCorrections()
+      }
+    } catch(e) { console.error(e) }
+    finally { setSaving(false) }
+  }
+
+  const deleteCorrection = async (companyName) => {
+    try {
+      await fetch('/api/dq-corrections', {
+        method:'DELETE', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ companyName }),
+      })
+      await loadCorrections()
+    } catch(e) { console.error(e) }
+  }
+
+  const inp = (field) => ({
+    value: form[field],
+    onChange: e => setForm(p => ({ ...p, [field]: e.target.value })),
+    style: { width:'100%', padding:'6px 10px', background:C.panel,
+      border:`1px solid ${C.border}`, borderRadius:6, fontSize:12,
+      color:C.text, outline:'none', marginTop:4 },
+  })
+
+  return (
+    <Card>
+      <CardHead right={
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          <span style={{ fontSize:11, color:C.sub }}>{corrections.length} corrections saved</span>
+          <Btn small variant="primary" onClick={() => setShowAdd(v=>!v)}>
+            {showAdd ? 'Cancel' : '+ Add Correction'}
+          </Btn>
+        </div>
+      }>Verified Corrections</CardHead>
+
+      <div style={{ padding:16, display:'flex', flexDirection:'column', gap:12 }}>
+        <Callout type="info">
+          When the enrichment tool returns a wrong answer, add a correction here.
+          Corrections are stored in Azure and checked first on every future enrichment run —
+          before any web search is attempted. User corrections always win.
+        </Callout>
+
+        {/* Add form */}
+        {showAdd && (
+          <div style={{ padding:14, background:C.panel, border:`1px solid ${C.accent}33`,
+            borderRadius:10, display:'flex', flexDirection:'column', gap:10 }}>
+            <div style={{ fontSize:12, fontWeight:600, color:C.accent, marginBottom:2 }}>
+              Add Verified Correction
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div>
+                <label style={{ fontSize:11, color:C.sub }}>Company name in HubSpot *</label>
+                <input {...inp('companyName')} placeholder="e.g. Edward-Elmhurst Health" />
+              </div>
+              <div>
+                <label style={{ fontSize:11, color:C.sub }}>Current correct name</label>
+                <input {...inp('currentName')} placeholder="e.g. Endeavor Health" />
+              </div>
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div>
+                <label style={{ fontSize:11, color:C.sub }}>Company type</label>
+                <select value={form.company_type}
+                  onChange={e => setForm(p=>({...p, company_type:e.target.value}))}
+                  style={{ width:'100%', padding:'6px 10px', background:C.panel,
+                    border:`1px solid ${C.border}`, borderRadius:6, fontSize:12,
+                    color:C.text, outline:'none', marginTop:4 }}>
+                  <option value="">— select —</option>
+                  {COMPANY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize:11, color:C.sub }}>Parent system name</label>
+                <input {...inp('parent_system_name')} placeholder="e.g. Advocate Health" />
+              </div>
+            </div>
+
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <input type="checkbox" checked={form.nameChanged}
+                onChange={e => setForm(p=>({...p, nameChanged:e.target.checked}))}
+                style={{ accentColor:C.accent }} id="nameChanged" />
+              <label htmlFor="nameChanged" style={{ fontSize:12, color:C.sub, cursor:'pointer' }}>
+                Organization has been renamed (nameChanged = true)
+              </label>
+            </div>
+
+            <div>
+              <label style={{ fontSize:11, color:C.sub }}>Plain English notes</label>
+              <input {...inp('notes')} placeholder="e.g. Merged with NorthShore, rebranded December 2023" />
+            </div>
+
+            <div>
+              <label style={{ fontSize:11, color:C.sub }}>Recent changes description</label>
+              <input {...inp('recentChanges')} placeholder="e.g. Merged with NorthShore University HealthSystem (Dec 2023)" />
+            </div>
+
+            <div>
+              <label style={{ fontSize:11, color:C.sub }}>Evidence URL (press release, news article)</label>
+              <input {...inp('evidenceUrl')} placeholder="https://www.prnewswire.com/..." />
+            </div>
+
+            <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+              <Btn variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Btn>
+              <Btn variant="primary" disabled={saving || !form.companyName.trim()} onClick={saveCorrection}>
+                {saving ? 'Saving…' : 'Save Correction'}
+              </Btn>
+            </div>
+          </div>
+        )}
+
+        {/* Corrections list */}
+        {loading && <div style={{ fontSize:12, color:C.sub }}>Loading…</div>}
+
+        {!loading && corrections.length === 0 && !showAdd && (
+          <div style={{ fontSize:12, color:C.muted, textAlign:'center', padding:'12px 0' }}>
+            No corrections saved yet. When the enrichment tool gets something wrong, add it here.
+          </div>
+        )}
+
+        {corrections.map((c,i) => (
+          <div key={i} style={{ padding:'11px 14px', background:C.card,
+            border:`1px solid ${C.border}`, borderRadius:9,
+            display:'flex', alignItems:'flex-start', gap:12 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                <span style={{ fontSize:13, fontWeight:600 }}>{c.companyName}</span>
+                {c.nameChanged && (
+                  <>
+                    <span style={{ color:C.muted }}>→</span>
+                    <span style={{ fontSize:13, fontWeight:600, color:C.green }}>{c.currentName}</span>
+                  </>
+                )}
+                <Pill color={C.green}>User verified</Pill>
+              </div>
+              <div style={{ display:'flex', gap:12, fontSize:11, color:C.sub, flexWrap:'wrap' }}>
+                {c.company_type && <span>Type: <strong>{c.company_type}</strong></span>}
+                {c.parent_system_name && <span>Parent: <strong>{c.parent_system_name}</strong></span>}
+                {c.addedAt && <span style={{ color:C.muted }}>Added {c.addedAt.slice(0,10)}</span>}
+              </div>
+              {c.notes && <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>{c.notes}</div>}
+              {c.evidenceUrl && (
+                <a href={c.evidenceUrl} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize:10, color:C.accent, marginTop:4, display:'block' }}>
+                  Source →
+                </a>
+              )}
+            </div>
+            <button onClick={() => deleteCorrection(c.companyName)}
+              style={{ background:'none', border:'none', color:C.muted, cursor:'pointer',
+                fontSize:16, padding:'0 4px', flexShrink:0 }}
+              title="Remove correction">×</button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 // ─── Export Panel ─────────────────────────────────────────────────────────────
 function ExportPanel({ scanResult }) {
   const [exporting, setExporting] = useState({})
@@ -777,7 +975,8 @@ export default function App() {
     { key:'2',  label:'Hierarchy',   count:p2?.total },
     { key:'3',  label:'Contacts',    count:p3?.total },
     { key:'4',  label:'Stale',       count:(p4?.neverContacted||0)+(p4?.stale1Year||0) },
-    { key:'export', label:'Export' },
+    { key:'export',      label:'Export' },
+    { key:'corrections', label:'Corrections' },
   ]
 
   return (
@@ -812,11 +1011,10 @@ export default function App() {
           </Btn>
         </div>
 
-        {/* Step nav */}
-        {scanResult && (
-          <div style={{ background:C.panel, borderBottom:`1px solid ${C.border}`,
-            padding:'0 24px', display:'flex', gap:0, overflowX:'auto' }}>
-            {STEPS.map(step => (
+        {/* Step nav — show corrections tab always */}
+        <div style={{ background:C.panel, borderBottom:`1px solid ${C.border}`,
+          padding:'0 24px', display:'flex', gap:0, overflowX:'auto' }}>
+          {(scanResult ? STEPS : [{ key:'corrections', label:'Corrections' }]).map(step => (
               <button key={step.key} onClick={() => setActiveStep(step.key)}
                 style={{ padding:'10px 16px', background:'none', border:'none', cursor:'pointer',
                   fontSize:12, fontWeight:activeStep===step.key?600:400, whiteSpace:'nowrap',
@@ -830,8 +1028,7 @@ export default function App() {
                 )}
               </button>
             ))}
-          </div>
-        )}
+        </div>
 
         {/* Content */}
         <div style={{ flex:1, padding:24, display:'flex', flexDirection:'column', gap:16,
@@ -883,6 +1080,9 @@ export default function App() {
 
           {error && <Callout type="error">✗ {error}</Callout>}
 
+          {/* Corrections accessible even before scanning */}
+          {!scanResult && !scanning && activeStep === 'corrections' && <CorrectionsPanel />}
+
           {scanning && (
             <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
               justifyContent:'center', flex:1, gap:14, paddingTop:60 }}>
@@ -929,7 +1129,8 @@ export default function App() {
               {activeStep === '2' && <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />}
               {activeStep === '3' && <Step3 data={scanResult.phase3} />}
               {activeStep === '4' && <Step4 data={scanResult.phase4} />}
-              {activeStep === 'export' && <ExportPanel scanResult={scanResult} />}
+              {activeStep === 'export'      && <ExportPanel scanResult={scanResult} />}
+              {activeStep === 'corrections' && <CorrectionsPanel />}
             </>
           )}
         </div>
