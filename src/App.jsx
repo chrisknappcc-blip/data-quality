@@ -3,370 +3,356 @@ import { useAuth, SignIn } from '@clerk/clerk-react'
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
-  bg:'#0d0f12', panel:'#13161b', card:'#191d24', border:'#242830',
-  text:'#e8eaf0', sub:'#8b91a0', muted:'#4a5060',
-  accent:'#4f8ef7', green:'#34c97a', amber:'#f5a623', red:'#f05252', purple:'#a78bfa',
+  bg:'#0c0e11', panel:'#12151a', card:'#181c22', border:'#1e2330',
+  borderHi:'#2a3040', text:'#dde1eb', sub:'#7a8194', muted:'#3d4355',
+  accent:'#4f8ef7', green:'#2ecc7a', amber:'#f0a500', red:'#e84545', purple:'#9b77f5',
 }
 
 const css = `
 * { box-sizing:border-box; margin:0; padding:0; }
-body { background:${C.bg}; color:${C.text}; font-family:'IBM Plex Sans',sans-serif; font-size:13px; }
-::-webkit-scrollbar { width:6px; height:6px; }
-::-webkit-scrollbar-track { background:${C.panel}; }
+body { background:${C.bg}; color:${C.text}; font-family:'IBM Plex Sans',sans-serif; font-size:13px; line-height:1.5; }
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:${C.border}; border-radius:3px; }
 a { color:${C.accent}; text-decoration:none; }
+a:hover { text-decoration:underline; }
 button { font-family:inherit; cursor:pointer; }
 input,select { font-family:inherit; }
 `
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const sev = {
-  high:   { color:C.red,   bg:'rgba(240,82,82,.1)',   border:'rgba(240,82,82,.25)' },
-  medium: { color:C.amber, bg:'rgba(245,166,35,.1)',  border:'rgba(245,166,35,.25)' },
-  low:    { color:C.sub,   bg:'rgba(255,255,255,.04)',border:C.border },
+// ─── Utility components ───────────────────────────────────────────────────────
+function Pill({ children, color, bg }) {
+  return <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:'.07em',
+    padding:'2px 7px', borderRadius:20, background:bg||`${color}18`, color, flexShrink:0 }}>{children}</span>
 }
 
-function Badge({ children, color, bg, border }) {
-  return <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em',
-    padding:'2px 6px', borderRadius:3, background:bg, color, border:`1px solid ${border}`, flexShrink:0 }}>{children}</span>
-}
-
-function SevBadge({ severity }) {
-  const s = sev[severity] || sev.low
-  return <Badge color={s.color} bg={s.bg} border={s.border}>{severity}</Badge>
-}
-
-function ConfBadge({ confidence }) {
-  const color = confidence === 'high' ? C.green : C.amber
-  const bg    = confidence === 'high' ? 'rgba(52,201,122,.1)' : 'rgba(245,166,35,.1)'
-  const bord  = confidence === 'high' ? 'rgba(52,201,122,.25)' : 'rgba(245,166,35,.25)'
-  return <Badge color={color} bg={bg} border={bord}>{confidence}</Badge>
+function StatusPill({ status }) {
+  const map = {
+    high:   [C.red,   `${C.red}18`],
+    medium: [C.amber, `${C.amber}18`],
+    low:    [C.sub,   `${C.sub}14`],
+    high_confidence: [C.green, `${C.green}18`],
+    medium_confidence: [C.amber, `${C.amber}18`],
+  }
+  const [color, bg] = map[status] || map.low
+  return <Pill color={color} bg={bg}>{status.replace('_', ' ')}</Pill>
 }
 
 function Btn({ children, onClick, variant='default', disabled, small }) {
   const v = {
     default: { background:C.card, border:`1px solid ${C.border}`, color:C.sub },
     primary: { background:C.accent, border:'none', color:'#fff' },
-    green:   { background:'rgba(52,201,122,.15)', border:'1px solid rgba(52,201,122,.3)', color:C.green },
-    amber:   { background:'rgba(245,166,35,.1)', border:'1px solid rgba(245,166,35,.3)', color:C.amber },
+    green:   { background:`${C.green}18`, border:`1px solid ${C.green}44`, color:C.green },
     ghost:   { background:'none', border:`1px solid ${C.border}`, color:C.sub },
+    danger:  { background:`${C.red}18`, border:`1px solid ${C.red}44`, color:C.red },
   }
   const s = v[variant] || v.default
-  return (
-    <button disabled={disabled} onClick={onClick}
-      style={{ ...s, padding:small?'4px 10px':'7px 14px', borderRadius:6,
-        fontSize:small?11:12, fontWeight:500, opacity:disabled?.5:1, transition:'opacity .15s' }}>
-      {children}
-    </button>
-  )
+  return <button disabled={disabled} onClick={onClick}
+    style={{ ...s, padding:small?'4px 12px':'7px 16px', borderRadius:6,
+      fontSize:small?11:12, fontWeight:500, opacity:disabled?.45:1,
+      transition:'all .15s', whiteSpace:'nowrap' }}>{children}</button>
 }
 
-function Panel({ children, style }) {
-  return <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden', ...style }}>{children}</div>
+function Card({ children, style, accent }) {
+  return <div style={{ background:C.card, border:`1px solid ${accent||C.border}`,
+    borderRadius:10, overflow:'hidden', ...style }}>{children}</div>
 }
 
-function PHead({ children, right }) {
-  return (
-    <div style={{ padding:'9px 14px', borderBottom:`1px solid ${C.border}`, background:C.card,
-      display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-      <span style={{ fontSize:10, fontWeight:600, letterSpacing:'.08em', textTransform:'uppercase', color:C.sub }}>{children}</span>
-      {right && <div style={{ display:'flex', gap:8, alignItems:'center' }}>{right}</div>}
+function CardHead({ children, right, accent }) {
+  return <div style={{ padding:'10px 16px', borderBottom:`1px solid ${C.border}`,
+    background:`${C.panel}88`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+    <span style={{ fontSize:11, fontWeight:600, letterSpacing:'.06em',
+      textTransform:'uppercase', color:accent||C.sub }}>{children}</span>
+    {right && <div style={{ display:'flex', gap:8, alignItems:'center' }}>{right}</div>}
+  </div>
+}
+
+function StatRow({ label, value, color, sub }) {
+  return <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline',
+    padding:'7px 0', borderBottom:`1px solid ${C.border}` }}>
+    <span style={{ color:C.sub, fontSize:12 }}>{label}</span>
+    <div style={{ textAlign:'right' }}>
+      <span style={{ fontWeight:600, fontFamily:'IBM Plex Mono', color:color||C.text, fontSize:13 }}>{value}</span>
+      {sub && <div style={{ fontSize:10, color:C.muted }}>{sub}</div>}
     </div>
-  )
+  </div>
 }
 
-function KpiCard({ label, value, color }) {
-  return (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:8, padding:'12px 14px' }}>
-      <div style={{ fontSize:22, fontWeight:700, fontFamily:'IBM Plex Mono', color:color||C.text, marginBottom:4 }}>{value??'—'}</div>
-      <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:'.05em' }}>{label}</div>
-    </div>
-  )
-}
-
-function InfoBox({ children, color }) {
-  color = color || C.accent
-  return (
-    <div style={{ fontSize:11, padding:'8px 12px', background:`${color}14`,
-      border:`1px solid ${color}33`, borderRadius:6, color, lineHeight:1.5 }}>
-      ⓘ {children}
-    </div>
-  )
-}
-
-function ExpandRow({ header, children, defaultOpen }) {
-  const [open, setOpen] = useState(!!defaultOpen)
-  return (
-    <div>
-      <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
-        cursor:'pointer', userSelect:'none' }} onClick={() => setOpen(v => !v)}>
-        {header}
-        <span style={{ fontSize:10, color:C.accent, marginLeft:'auto' }}>{open?'▲':'▼'}</span>
+function SummaryGrid({ items }) {
+  return <div style={{ display:'grid', gridTemplateColumns:`repeat(${items.length},1fr)`, gap:1,
+    background:C.border, borderRadius:8, overflow:'hidden', margin:'0 0 0 0' }}>
+    {items.map((item,i) => (
+      <div key={i} style={{ background:C.card, padding:'12px 14px', textAlign:'center' }}>
+        <div style={{ fontSize:20, fontWeight:700, fontFamily:'IBM Plex Mono',
+          color:item.color||C.text, marginBottom:3 }}>{item.value??'—'}</div>
+        <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:'.04em' }}>{item.label}</div>
       </div>
-      {open && <div style={{ padding:'0 14px 14px' }}>{children}</div>}
-    </div>
-  )
+    ))}
+  </div>
 }
 
-// ─── Phase 0 ─────────────────────────────────────────────────────────────────
-function Phase0Panel({ data }) {
+function Callout({ children, type='info' }) {
+  const colors = { info:C.accent, warn:C.amber, error:C.red, success:C.green }
+  const c = colors[type] || C.accent
+  return <div style={{ fontSize:11, padding:'9px 13px', background:`${c}0f`,
+    border:`1px solid ${c}33`, borderRadius:8, color:C.sub, lineHeight:1.6 }}>
+    {children}
+  </div>
+}
+
+function Accordion({ header, children, defaultOpen, borderColor }) {
+  const [open, setOpen] = useState(!!defaultOpen)
+  return <div style={{ borderTop:`1px solid ${borderColor||C.border}` }}>
+    <div style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 16px',
+      cursor:'pointer', userSelect:'none' }} onClick={() => setOpen(v=>!v)}>
+      {header}
+      <span style={{ fontSize:10, color:C.muted, marginLeft:'auto', flexShrink:0 }}>{open?'▲':'▼'}</span>
+    </div>
+    {open && <div style={{ padding:'0 16px 14px' }}>{children}</div>}
+  </div>
+}
+
+// ─── Step 0: Pre-Filter ───────────────────────────────────────────────────────
+function Step0({ data }) {
   if (!data) return null
   const { excludedCompanies, excludedContacts, emailRepairTargets, summary } = data
   const needsTag = excludedCompanies.filter(c => c.flaggedForTag)
 
   return (
-    <Panel>
-      <PHead right={<span style={{ fontSize:11, color:C.sub }}>{summary.totalExcluded} records excluded from enrichment</span>}>
-        Phase 0 — Pre-Filter
-      </PHead>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:8, padding:12 }}>
-        <KpiCard label="Vendor Companies"   value={summary.vendorCompanies}    color={C.amber} />
-        <KpiCard label="Needs Vendor Tag"   value={summary.needsVendorTag}     color={C.amber} />
-        <KpiCard label="Excluded Contacts"  value={summary.excludedContacts}   color={C.amber} />
-        <KpiCard label="Email Repair"       value={summary.emailRepairTargets} color={C.red} />
-        <KpiCard label="Total Excluded"     value={summary.totalExcluded}      color={C.sub} />
-      </div>
+    <Card>
+      <CardHead right={
+        summary.totalExcluded > 0
+          ? <Pill color={C.amber}>{summary.totalExcluded} excluded from enrichment</Pill>
+          : <Pill color={C.green}>Nothing to exclude</Pill>
+      }>Step 1 — Pre-Filter</CardHead>
 
-      {needsTag.length > 0 && (
-        <div style={{ padding:'0 12px 12px' }}>
-          <InfoBox color={C.amber}>
-            {needsTag.length} companies detected as vendors but not yet tagged in HubSpot.
-            Export the Vendor List CSV and review — import to tag them as Vendor/Supplier before enrichment.
-          </InfoBox>
-          <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:4 }}>
-            {needsTag.slice(0,10).map((co,i) => (
-              <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 10px',
-                background:C.card, borderRadius:6, border:`1px solid ${C.border}` }}>
-                <span style={{ flex:1, fontSize:12 }}>{co.name}</span>
-                <span style={{ fontSize:10, color:C.sub }}>{co.reason}</span>
-                <a href={co.url} target="_blank" rel="noopener noreferrer" style={{ fontSize:10 }}>Open →</a>
-              </div>
-            ))}
-            {needsTag.length > 10 && <div style={{ fontSize:11, color:C.muted, padding:'4px 0' }}>+ {needsTag.length-10} more in export</div>}
+      <div style={{ padding:16, display:'flex', flexDirection:'column', gap:14 }}>
+        <SummaryGrid items={[
+          { label:'Vendor Companies', value:summary.vendorCompanies, color:summary.vendorCompanies>0?C.amber:C.green },
+          { label:'Needs Vendor Tag', value:summary.needsVendorTag,  color:summary.needsVendorTag>0?C.amber:C.green },
+          { label:'Excluded Contacts', value:summary.excludedContacts, color:summary.excludedContacts>0?C.amber:C.green },
+          { label:'Email Repair', value:summary.emailRepairTargets, color:summary.emailRepairTargets>0?C.red:C.green },
+        ]} />
+
+        {needsTag.length > 0 ? (
+          <div>
+            <div style={{ fontSize:12, fontWeight:600, marginBottom:8 }}>
+              Companies to tag as Vendor/Supplier
+            </div>
+            <Callout type="warn">
+              These {needsTag.length} companies were detected as vendors but aren't tagged yet in HubSpot.
+              They'll be included in the Field Updates export — review before importing.
+            </Callout>
+            <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:3 }}>
+              {needsTag.map((co,i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 10px',
+                  background:C.panel, borderRadius:7, border:`1px solid ${C.border}` }}>
+                  <span style={{ flex:1, fontSize:12 }}>{co.name}</span>
+                  <span style={{ fontSize:11, color:C.sub }}>{co.reason}</span>
+                  <a href={co.url} target="_blank" rel="noopener noreferrer" style={{ fontSize:11 }}>Open →</a>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <Callout type="success">✓ No vendor companies detected — all Gold accounts look like legitimate targets.</Callout>
+        )}
 
-      {emailRepairTargets.length > 0 && (
-        <div style={{ padding:'0 12px 12px' }}>
-          <InfoBox color={C.red}>
-            {emailRepairTargets.length} contacts have bounced or missing emails — these are repair targets, not exclusions.
-            Export the Email Repair CSV to track them for ZoomInfo or web search enrichment.
-          </InfoBox>
-        </div>
-      )}
-    </Panel>
+        {emailRepairTargets.length > 0 && (
+          <Callout type="error">
+            {emailRepairTargets.length} contacts have bounced or missing emails.
+            Export the Email Repair list for ZoomInfo or manual research.
+          </Callout>
+        )}
+      </div>
+    </Card>
   )
 }
 
-// ─── Phase 1 ─────────────────────────────────────────────────────────────────
-function Phase1Panel({ data, approved, onApprove }) {
+// ─── Step 1: Dedup ────────────────────────────────────────────────────────────
+function Step1({ data, approved, onApprove }) {
   if (!data) return null
   const { issues, summary, analyzedCompanies } = data
+  const hasIssues = issues.length > 0
 
   return (
-    <Panel>
-      <PHead right={<span style={{ fontSize:11, color:C.sub }}>{analyzedCompanies} companies analyzed · {issues.length} issues</span>}>
-        Phase 1 — Company Dedup + Domain Cleanup
-      </PHead>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, padding:12 }}>
-        <KpiCard label="Duplicate Names"   value={summary.duplicateNames}  color={summary.duplicateNames>0?C.red:C.green} />
-        <KpiCard label="Same Domain"       value={summary.sameDomain}      color={summary.sameDomain>0?C.amber:C.green} />
-        <KpiCard label="Missing Domain"    value={summary.missingDomain}   color={summary.missingDomain>0?C.amber:C.green} />
-        <KpiCard label="Manual Merges"     value={summary.mergesRequired}  color={summary.mergesRequired>0?C.red:C.green} />
-      </div>
-      {issues.length === 0
-        ? <div style={{ padding:'16px 14px', color:C.sub, textAlign:'center' }}>✓ No issues found</div>
-        : issues.map((issue, i) => (
-          <div key={issue.issueId} style={{ borderTop:`1px solid ${C.border}`,
-            background:approved[issue.issueId]?'rgba(52,201,122,.04)':'transparent' }}>
-            <ExpandRow header={
-              <>
-                <SevBadge severity={issue.severity} />
-                <span style={{ fontSize:12, fontWeight:500, flex:1 }}>{issue.label}</span>
-                <span style={{ fontSize:10, color:C.muted }}>{issue.records.length} record{issue.records.length>1?'s':''}</span>
-              </>
-            }>
-              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                <p style={{ fontSize:11, color:C.sub }}>{issue.description}</p>
-                {issue.records.map((rec,j) => (
-                  <div key={j} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 10px',
-                    background:C.card, borderRadius:6, border:`1px solid ${C.border}` }}>
-                    <div style={{ flex:1 }}>
-                      <a href={rec.url} target="_blank" rel="noopener noreferrer" style={{ fontWeight:500 }}>{rec.name}</a>
-                      <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>{rec.tier} · {rec.domain||'no domain'} · {rec.contacts} contacts</div>
+    <Card>
+      <CardHead right={
+        hasIssues
+          ? <Pill color={C.amber}>{issues.length} issues found</Pill>
+          : <Pill color={C.green}>All clear</Pill>
+      }>Step 2 — Duplicate Detection</CardHead>
+
+      <div style={{ padding:16, display:'flex', flexDirection:'column', gap:14 }}>
+        <SummaryGrid items={[
+          { label:'Duplicate Names',  value:summary.duplicateNames,  color:summary.duplicateNames>0?C.red:C.green },
+          { label:'Shared Domain',    value:summary.sameDomain,      color:summary.sameDomain>0?C.amber:C.green },
+          { label:'Missing Domain',   value:summary.missingDomain,   color:summary.missingDomain>0?C.amber:C.green },
+          { label:'Merges Needed',    value:summary.mergesRequired,  color:summary.mergesRequired>0?C.red:C.green },
+        ]} />
+
+        {!hasIssues && <Callout type="success">✓ No duplicate companies found across {analyzedCompanies} accounts.</Callout>}
+
+        {issues.map((issue, i) => (
+          <Accordion key={issue.issueId} header={
+            <>
+              <StatusPill status={issue.severity} />
+              <span style={{ fontSize:12, fontWeight:500, flex:1 }}>{issue.label}</span>
+              {approved[issue.issueId] && <Pill color={C.green}>Reviewed</Pill>}
+            </>
+          }>
+            <div style={{ display:'flex', flexDirection:'column', gap:8, marginTop:4 }}>
+              <p style={{ fontSize:12, color:C.sub }}>{issue.description}</p>
+
+              {issue.records.map((rec,j) => (
+                <div key={j} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px',
+                  background:C.panel, borderRadius:8, border:`1px solid ${C.border}` }}>
+                  <div style={{ flex:1 }}>
+                    <a href={rec.url} target="_blank" rel="noopener noreferrer"
+                      style={{ fontWeight:600, fontSize:12 }}>{rec.name}</a>
+                    <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
+                      {rec.tier} · {rec.domain||'no domain'} · {rec.contacts} contacts
                     </div>
-                    {j===0 && issue.action==='MERGE_MANUAL' && <Badge color={C.green} bg="rgba(52,201,122,.1)" border="rgba(52,201,122,.25)">KEEP</Badge>}
-                    {j>0  && issue.action==='MERGE_MANUAL' && <Badge color={C.red} bg="rgba(240,82,82,.1)" border="rgba(240,82,82,.25)">MERGE INTO PRIMARY</Badge>}
                   </div>
-                ))}
-                {issue.manualNote && <InfoBox>{issue.manualNote}</InfoBox>}
-                <div style={{ display:'flex', gap:8 }}>
-                  {!approved[issue.issueId]
-                    ? <Btn small variant="green" onClick={() => onApprove(issue.issueId, issue)}>Mark Reviewed ✓</Btn>
-                    : <span style={{ fontSize:11, color:C.green }}>✓ Reviewed</span>
-                  }
-                  <Btn small onClick={() => window.open(issue.records[0].url,'_blank')}>Open in HubSpot →</Btn>
+                  {j===0 && issue.action==='MERGE_MANUAL' && <Pill color={C.green}>Keep this one</Pill>}
+                  {j>0  && issue.action==='MERGE_MANUAL' && <Pill color={C.red}>Merge into primary</Pill>}
                 </div>
+              ))}
+
+              {issue.manualNote && <Callout type="info">Action: {issue.manualNote}</Callout>}
+
+              <div style={{ display:'flex', gap:8, marginTop:4 }}>
+                {!approved[issue.issueId]
+                  ? <Btn small variant="green" onClick={() => onApprove(issue.issueId, issue)}>Mark as reviewed ✓</Btn>
+                  : <span style={{ fontSize:11, color:C.green }}>✓ Reviewed</span>
+                }
+                <Btn small onClick={() => window.open(issue.records[0].url,'_blank')}>Open in HubSpot</Btn>
               </div>
-            </ExpandRow>
-          </div>
-        ))
-      }
-    </Panel>
+            </div>
+          </Accordion>
+        ))}
+      </div>
+    </Card>
   )
 }
 
-// ─── Phase 2 ─────────────────────────────────────────────────────────────────
-function Phase2Panel({ data, approved, onApprove, companies }) {
-  const [enriching, setEnriching]       = useState(false)
+// ─── Step 2: Hierarchy ────────────────────────────────────────────────────────
+function Step2({ data, approved, onApprove, companies }) {
+  const [enriching, setEnriching]         = useState(false)
   const [enrichResults, setEnrichResults] = useState([])
   const [enrichProgress, setEnrichProgress] = useState('')
-  const [enrichDone, setEnrichDone]     = useState(false)
-  const [enrichError, setEnrichError]   = useState(null)
+  const [enrichDone, setEnrichDone]       = useState(false)
+  const [enrichError, setEnrichError]     = useState(null)
 
   if (!data) return null
-  const { proposals, summary, analyzedCompanies } = data
+  const { proposals, summary } = data
 
   const runEnrichment = async () => {
-    setEnriching(true)
-    setEnrichResults([])
-    setEnrichDone(false)
-    setEnrichError(null)
-
-    const allResults = []
-    const batchSize  = 10
-    let batchStart   = 0
-    const total      = companies.length
-
+    setEnriching(true); setEnrichResults([]); setEnrichDone(false); setEnrichError(null)
+    const allResults = []; const batchSize = 10; let batchStart = 0
     try {
-      while (batchStart < total) {
-        setEnrichProgress(`Researching ${batchStart + 1}–${Math.min(batchStart + batchSize, total)} of ${total} companies…`)
+      while (batchStart < companies.length) {
+        setEnrichProgress(`Researching companies ${batchStart+1}–${Math.min(batchStart+batchSize, companies.length)} of ${companies.length}…`)
         const res = await fetch('/api/dq-enrich', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ companies, batchStart, batchSize }),
         })
-        if (!res.ok) throw new Error('Enrichment request failed')
-        const data = await res.json()
-        allResults.push(...(data.results || []))
-        if (!data.hasMore) break
-        batchStart = data.nextBatch
-        // Small pause between batches
+        if (!res.ok) throw new Error('Research request failed')
+        const d = await res.json()
+        allResults.push(...(d.results||[]))
+        if (!d.hasMore) break
+        batchStart = d.nextBatch
         await new Promise(r => setTimeout(r, 1000))
       }
-      setEnrichResults(allResults)
-      setEnrichDone(true)
-      setEnrichProgress('')
-    } catch (e) {
-      setEnrichError(e.message)
-      setEnrichProgress('')
-    } finally {
-      setEnriching(false)
-    }
+      setEnrichResults(allResults); setEnrichDone(true); setEnrichProgress('')
+    } catch(e) { setEnrichError(e.message); setEnrichProgress('') }
+    finally { setEnriching(false) }
   }
 
-  const nameChanges   = enrichResults.flatMap(r => r.flags || []).filter(f => f.type === 'NAME_CHANGED')
-  const recentChanges = enrichResults.flatMap(r => r.flags || []).filter(f => f.type === 'RECENT_CHANGE')
-  const withUpdates   = enrichResults.filter(r => (r.fieldUpdates || []).length > 0)
+  const nameChanges    = enrichResults.flatMap(r=>r.flags||[]).filter(f=>f.type==='NAME_CHANGED')
+  const recentChanges  = enrichResults.flatMap(r=>r.flags||[]).filter(f=>f.type==='RECENT_CHANGE')
+  const withUpdates    = enrichResults.filter(r=>(r.fieldUpdates||[]).length>0)
 
   return (
-    <Panel>
-      <PHead right={<span style={{ fontSize:11, color:C.sub }}>{analyzedCompanies} analyzed · {proposals.length} proposals</span>}>
-        Phase 2 — Parent/Subsidiary Hierarchy Mapping
-      </PHead>
+    <Card>
+      <CardHead right={<Pill color={C.accent}>{proposals.length} proposals</Pill>}>
+        Step 3 — Hierarchy & Parent/Subsidiary Mapping
+      </CardHead>
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8, padding:12 }}>
-        <KpiCard label="Total Proposals"    value={summary.total}              />
-        <KpiCard label="High Confidence"    value={summary.highConfidence}     color={C.green} />
-        <KpiCard label="CSV Exportable"     value={summary.csvExportable}      color={C.accent} />
-        <KpiCard label="Need Association"   value={summary.requireAssociation} color={C.amber} />
-      </div>
+      <div style={{ padding:16, display:'flex', flexDirection:'column', gap:14 }}>
+        <SummaryGrid items={[
+          { label:'Total Proposals',    value:summary.total },
+          { label:'High Confidence',    value:summary.highConfidence,     color:C.green },
+          { label:'Ready to Export',    value:summary.csvExportable,      color:C.accent },
+          { label:'Needs Association',  value:summary.requireAssociation, color:summary.requireAssociation>0?C.amber:C.green },
+        ]} />
 
-      {/* Enrichment section */}
-      <div style={{ padding:'0 12px 12px' }}>
-        <div style={{ padding:'12px', background:C.card, border:`1px solid ${C.border}`,
-          borderRadius:8, display:'flex', flexDirection:'column', gap:10 }}>
-          <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:12 }}>
-            <div>
-              <div style={{ fontSize:12, fontWeight:600, marginBottom:4 }}>
-                🔍 Live Research Enrichment
+        {/* Live Research */}
+        <div style={{ background:C.panel, border:`1px solid ${C.borderHi}`, borderRadius:10, padding:14 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:14 }}>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:13, fontWeight:600, marginBottom:5 }}>Live Research Verification</div>
+              <div style={{ fontSize:12, color:C.sub, lineHeight:1.6 }}>
+                The static proposals above are based on built-in knowledge and may be outdated.
+                Run live research to verify current names, detect recent mergers and rebrandings,
+                and confirm parent/subsidiary relationships as of 2025.
               </div>
-              <div style={{ fontSize:11, color:C.sub, lineHeight:1.5 }}>
-                The static knowledge base above may be outdated. Run live research to verify current
-                names, detect recent mergers/acquisitions, and update hierarchy proposals with
-                real-time data from the web. Each company is researched individually via Claude + web search.
-              </div>
-              <div style={{ fontSize:10, color:C.muted, marginTop:4 }}>
-                ~{Math.ceil(companies.length / 10)} batches · ~{Math.ceil(companies.length * 2 / 60)} minutes · processes all {companies.length} companies
+              <div style={{ fontSize:11, color:C.muted, marginTop:5 }}>
+                {Math.ceil(companies.length/10)} batches · ~{Math.ceil(companies.length*2/60)} min · {companies.length} companies
               </div>
             </div>
-            <Btn variant="primary" disabled={enriching} onClick={runEnrichment} style={{ flexShrink:0 }}>
-              {enriching ? 'Researching…' : enrichDone ? 'Re-run Research' : 'Run Live Research'}
+            <Btn variant="primary" disabled={enriching} onClick={runEnrichment}>
+              {enriching ? '⟳ Researching…' : enrichDone ? 'Re-run' : 'Run Research'}
             </Btn>
           </div>
 
           {enriching && (
-            <div style={{ fontSize:12, color:C.accent, padding:'8px 0' }}>
-              ⟳ {enrichProgress}
-            </div>
+            <div style={{ marginTop:12, fontSize:12, color:C.accent }}>{enrichProgress}</div>
           )}
-
           {enrichError && (
-            <div style={{ fontSize:11, color:C.red, padding:'6px 10px',
-              background:'rgba(240,82,82,.08)', borderRadius:6 }}>
-              ✗ {enrichError}
-            </div>
+            <div style={{ marginTop:10 }}><Callout type="error">{enrichError}</Callout></div>
           )}
 
           {enrichDone && enrichResults.length > 0 && (
-            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              {/* Summary */}
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8 }}>
-                <KpiCard label="Researched"     value={enrichResults.length} />
-                <KpiCard label="Name Changes"   value={nameChanges.length}   color={nameChanges.length>0?C.red:C.green} />
-                <KpiCard label="Recent Changes" value={recentChanges.length} color={recentChanges.length>0?C.amber:C.green} />
-                <KpiCard label="Field Updates"  value={withUpdates.length}   color={C.accent} />
-              </div>
+            <div style={{ marginTop:14, display:'flex', flexDirection:'column', gap:12 }}>
+              <SummaryGrid items={[
+                { label:'Researched',      value:enrichResults.length },
+                { label:'Name Changes',    value:nameChanges.length,   color:nameChanges.length>0?C.red:C.green },
+                { label:'Recent Changes',  value:recentChanges.length, color:recentChanges.length>0?C.amber:C.green },
+                { label:'Updated Proposals', value:withUpdates.length, color:C.accent },
+              ]} />
 
-              {/* Name changes — most important */}
+              {/* Name changes */}
               {nameChanges.length > 0 && (
                 <div>
-                  <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase',
-                    letterSpacing:'.06em', color:C.red, marginBottom:6 }}>
-                    ⚠ Outdated Company Names ({nameChanges.length})
+                  <div style={{ fontSize:12, fontWeight:600, color:C.red, marginBottom:8 }}>
+                    Outdated Company Names — update these in HubSpot
                   </div>
-                  {enrichResults.filter(r => r.flags?.some(f => f.type === 'NAME_CHANGED')).map((r,i) => {
-                    const flag = r.flags.find(f => f.type === 'NAME_CHANGED')
+                  {enrichResults.filter(r=>r.flags?.some(f=>f.type==='NAME_CHANGED')).map((r,i) => {
+                    const flag = r.flags.find(f=>f.type==='NAME_CHANGED')
                     return (
-                      <div key={i} style={{ padding:'10px 12px', background:'rgba(240,82,82,.06)',
-                        border:'1px solid rgba(240,82,82,.2)', borderRadius:8, marginBottom:6 }}>
+                      <div key={i} style={{ padding:'12px', background:`${C.red}08`,
+                        border:`1px solid ${C.red}22`, borderRadius:9, marginBottom:8 }}>
                         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
                           <div>
-                            <div style={{ fontSize:12, fontWeight:600, color:C.red }}>
-                              {flag.currentName} <span style={{ color:C.muted }}>→</span> {flag.correctName}
+                            <div style={{ fontSize:13, fontWeight:600 }}>
+                              <span style={{ color:C.red }}>{flag.currentName}</span>
+                              <span style={{ color:C.muted, margin:'0 8px' }}>→</span>
+                              <span style={{ color:C.green }}>{flag.correctName}</span>
                             </div>
-                            <div style={{ fontSize:11, color:C.sub, marginTop:3 }}>{r.research.notes}</div>
-                            {r.research.recentChanges && (
-                              <div style={{ fontSize:11, color:C.amber, marginTop:3 }}>
-                                Recent: {r.research.recentChanges}
+                            <div style={{ fontSize:11, color:C.sub, marginTop:4 }}>{r.research?.notes}</div>
+                            {r.research?.recentChanges && (
+                              <div style={{ fontSize:11, color:C.amber, marginTop:4 }}>
+                                {r.research.recentChanges}
                               </div>
                             )}
                           </div>
-                          <a href={r.url} target="_blank" rel="noopener noreferrer"
-                            style={{ fontSize:11, color:C.accent, flexShrink:0, marginLeft:12 }}>
-                            Open →
-                          </a>
-                        </div>
-                        <div style={{ marginTop:8, display:'flex', gap:6, flexWrap:'wrap' }}>
-                          <Badge color={C.red} bg="rgba(240,82,82,.1)" border="rgba(240,82,82,.25)">
-                            UPDATE COMPANY NAME IN HUBSPOT
-                          </Badge>
-                          <Badge color={r.confidence==='high'?C.green:C.amber}
-                            bg={r.confidence==='high'?'rgba(52,201,122,.1)':'rgba(245,166,35,.1)'}
-                            border={r.confidence==='high'?'rgba(52,201,122,.25)':'rgba(245,166,35,.25)'}>
-                            {r.confidence} confidence
-                          </Badge>
+                          <div style={{ display:'flex', gap:6, alignItems:'center', flexShrink:0, marginLeft:12 }}>
+                            <StatusPill status={`${r.confidence}_confidence`} />
+                            <a href={r.url} target="_blank" rel="noopener noreferrer">
+                              <Btn small>Open →</Btn>
+                            </a>
+                          </div>
                         </div>
                       </div>
                     )
@@ -377,23 +363,21 @@ function Phase2Panel({ data, approved, onApprove, companies }) {
               {/* Recent changes */}
               {recentChanges.length > 0 && (
                 <div>
-                  <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase',
-                    letterSpacing:'.06em', color:C.amber, marginBottom:6 }}>
-                    Recent Mergers / Acquisitions / Rebrandings ({recentChanges.length})
+                  <div style={{ fontSize:12, fontWeight:600, color:C.amber, marginBottom:8 }}>
+                    Recent Mergers, Acquisitions & Rebrandings
                   </div>
-                  {enrichResults.filter(r => r.flags?.some(f => f.type === 'RECENT_CHANGE')).map((r,i) => {
-                    const flag = r.flags.find(f => f.type === 'RECENT_CHANGE')
+                  {enrichResults.filter(r=>r.flags?.some(f=>f.type==='RECENT_CHANGE')).map((r,i) => {
+                    const flag = r.flags.find(f=>f.type==='RECENT_CHANGE')
                     return (
-                      <div key={i} style={{ padding:'10px 12px', background:'rgba(245,166,35,.06)',
-                        border:'1px solid rgba(245,166,35,.2)', borderRadius:8, marginBottom:6,
+                      <div key={i} style={{ padding:'10px 14px', background:`${C.amber}08`,
+                        border:`1px solid ${C.amber}22`, borderRadius:9, marginBottom:6,
                         display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
                         <div>
                           <div style={{ fontSize:12, fontWeight:600 }}>{r.companyName}</div>
                           <div style={{ fontSize:11, color:C.sub, marginTop:3 }}>{flag.message}</div>
                         </div>
-                        <a href={r.url} target="_blank" rel="noopener noreferrer"
-                          style={{ fontSize:11, color:C.accent, flexShrink:0, marginLeft:12 }}>
-                          Open →
+                        <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ marginLeft:12, flexShrink:0 }}>
+                          <Btn small>Open →</Btn>
                         </a>
                       </div>
                     )
@@ -401,103 +385,70 @@ function Phase2Panel({ data, approved, onApprove, companies }) {
                 </div>
               )}
 
-              {/* Updated field proposals */}
-              {withUpdates.length > 0 && (
-                <div>
-                  <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase',
-                    letterSpacing:'.06em', color:C.accent, marginBottom:6 }}>
-                    Updated Hierarchy Proposals ({withUpdates.length})
-                  </div>
-                  {withUpdates.map((r,i) => (
-                    <div key={i} style={{ padding:'8px 12px', background:C.bgCard||C.card,
-                      border:`1px solid ${C.border}`, borderRadius:8, marginBottom:4 }}>
-                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-                        <span style={{ fontSize:12, fontWeight:500 }}>{r.companyName}</span>
-                        <ConfBadge confidence={r.confidence} />
-                      </div>
-                      {(r.fieldUpdates || []).map((u,j) => (
-                        <div key={j} style={{ display:'grid', gridTemplateColumns:'150px 1fr 1fr',
-                          gap:8, fontSize:11, marginBottom:3 }}>
-                          <span style={{ color:C.sub, fontFamily:'IBM Plex Mono' }}>{u.field}</span>
-                          <span style={{ color:C.muted }}>{u.currentValue || <em>empty</em>}</span>
-                          <span style={{ color:C.green }}>{u.proposedValue}</span>
-                        </div>
-                      ))}
-                      {r.research?.notes && (
-                        <div style={{ fontSize:10, color:C.muted, marginTop:4 }}>{r.research.notes}</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+              {nameChanges.length === 0 && recentChanges.length === 0 && (
+                <Callout type="success">✓ All company names and hierarchies appear current as of 2025.</Callout>
               )}
 
-              <InfoBox color={C.accent}>
-                Export the Field Updates CSV after running research — it will include these verified proposals.
-                Name changes need to be updated manually in HubSpot (the company record name field isn't importable).
-              </InfoBox>
+              <Callout type="info">
+                Export the Field Updates CSV to apply verified hierarchy changes.
+                Name changes must be updated manually in HubSpot — the export will flag which ones.
+              </Callout>
             </div>
           )}
         </div>
-      </div>
-      {proposals.length === 0
-        ? <div style={{ padding:'16px 14px', color:C.sub, textAlign:'center' }}>✓ All companies already have hierarchy assigned</div>
-        : proposals.map((p,i) => (
-          <div key={p.proposalId} style={{ borderTop:`1px solid ${C.border}`,
-            background:approved[p.proposalId]?'rgba(52,201,122,.04)':'transparent' }}>
-            <ExpandRow header={
-              <>
-                <ConfBadge confidence={p.confidence} />
-                <span style={{ fontSize:12, fontWeight:500, flex:1 }}>{p.companyName}</span>
-                <span style={{ fontSize:10, color:C.muted }}>{p.tier}</span>
-              </>
-            }>
-              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                <div style={{ fontSize:11, color:C.sub }}>Source: {p.source}</div>
-                {p.notes && <InfoBox color={C.amber}>{p.notes}</InfoBox>}
-                {(p.fieldUpdates||[]).map((u,j) => (
-                  <div key={j} style={{ display:'grid', gridTemplateColumns:'150px 1fr 1fr', gap:8,
-                    padding:'7px 10px', background:C.card, borderRadius:6, border:`1px solid ${C.border}` }}>
-                    <span style={{ fontSize:11, fontWeight:600, color:C.sub, fontFamily:'IBM Plex Mono' }}>{u.field}</span>
-                    <span style={{ fontSize:11, color:C.muted }}><em>current: </em>{u.currentValue||<em>empty</em>}</span>
-                    <span style={{ fontSize:11, color:C.green }}><em>proposed: </em>{u.proposedValue}</span>
+
+        {/* Static proposals (collapsed by default since research is preferred) */}
+        {proposals.length > 0 && (
+          <Accordion header={
+            <>
+              <span style={{ fontSize:12, fontWeight:500 }}>Static Proposals (built-in knowledge)</span>
+              <Pill color={C.sub}>{proposals.length} proposals</Pill>
+            </>
+          }>
+            <div style={{ display:'flex', flexDirection:'column', gap:4, marginTop:8 }}>
+              {proposals.slice(0,30).map((p,i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 10px',
+                  background:C.panel, borderRadius:7, border:`1px solid ${C.border}` }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <span style={{ fontSize:12, fontWeight:500 }}>{p.companyName}</span>
+                    <span style={{ fontSize:11, color:C.muted, marginLeft:8 }}>{p.tier}</span>
                   </div>
-                ))}
-                {p.associationRequired && (
-                  <InfoBox color={C.purple}>
-                    After importing CSV: open this record in HubSpot → Company Information → Parent Company → set "{p.parentCompanyName}"
-                  </InfoBox>
-                )}
-                <div style={{ display:'flex', gap:8 }}>
-                  {!approved[p.proposalId]
-                    ? <Btn small variant="green" onClick={() => onApprove(p.proposalId, p)}>Approve ✓</Btn>
-                    : <span style={{ fontSize:11, color:C.green }}>✓ Approved</span>
-                  }
-                  <Btn small onClick={() => window.open(p.url,'_blank')}>Open in HubSpot →</Btn>
+                  {(p.fieldUpdates||[]).map((u,j) => (
+                    <span key={j} style={{ fontSize:10, color:C.sub }}>
+                      {u.field}: <span style={{ color:C.accent }}>{u.proposedValue}</span>
+                    </span>
+                  ))}
+                  <StatusPill status={`${p.confidence}_confidence`} />
                 </div>
-              </div>
-            </ExpandRow>
-          </div>
-        ))
-      }
-    </Panel>
+              ))}
+              {proposals.length > 30 && (
+                <div style={{ fontSize:11, color:C.muted, padding:'4px 0' }}>
+                  + {proposals.length-30} more in export
+                </div>
+              )}
+            </div>
+          </Accordion>
+        )}
+      </div>
+    </Card>
   )
 }
 
-// ─── Phase 3 ─────────────────────────────────────────────────────────────────
-function Phase3Panel({ data }) {
+// ─── Step 3: Contacts ─────────────────────────────────────────────────────────
+function Step3({ data }) {
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   if (!data) return null
   const { issues, summary } = data
 
   const FILTERS = [
-    { key:'all',                  label:'All' },
-    { key:'EMAIL_REPAIR',         label:'Email Repair' },
-    { key:'MISSING_PERSONA',      label:'Missing Persona' },
-    { key:'MISSING_PRIMARY_REP',  label:'Missing Rep' },
-    { key:'MISSING_PHONE',        label:'Missing Phone' },
-    { key:'MISSING_PRIMARY_ENTITY',label:'Missing Entity' },
-    { key:'DOMAIN_MISMATCH',      label:'Domain Mismatch' },
+    { key:'all',                   label:'All issues' },
+    { key:'EMAIL_REPAIR',          label:'Email repair' },
+    { key:'MISSING_PERSONA',       label:'Missing persona' },
+    { key:'MISSING_PRIMARY_REP',   label:'Missing rep' },
+    { key:'MISSING_PHONE',         label:'Missing phone' },
+    { key:'MISSING_PRIMARY_ENTITY',label:'Missing entity' },
+    { key:'DOMAIN_MISMATCH',       label:'Domain mismatch' },
   ]
 
   const filtered = issues.filter(i => {
@@ -507,146 +458,197 @@ function Phase3Panel({ data }) {
     return true
   })
 
-  const typeColor = {
-    EMAIL_REPAIR:'#f05252', MISSING_PERSONA:'#f5a623',
-    MISSING_PRIMARY_REP:'#f5a623', MISSING_PHONE:'#8b91a0',
-    MISSING_PRIMARY_ENTITY:'#8b91a0', DOMAIN_MISMATCH:'#8b91a0',
+  const typeLabels = {
+    EMAIL_REPAIR:'Email repair needed',
+    MISSING_PERSONA:'No target persona',
+    MISSING_PRIMARY_REP:'No primary rep',
+    MISSING_PHONE:'No phone',
+    MISSING_PRIMARY_ENTITY:'No primary entity',
+    DOMAIN_MISMATCH:'Domain mismatch',
+  }
+
+  const typeColors = {
+    EMAIL_REPAIR:C.red, MISSING_PERSONA:C.amber,
+    MISSING_PRIMARY_REP:C.amber, MISSING_PHONE:C.sub,
+    MISSING_PRIMARY_ENTITY:C.sub, DOMAIN_MISMATCH:C.sub,
   }
 
   return (
-    <Panel>
-      <PHead right={<span style={{ fontSize:11, color:C.sub }}>{summary.total} issues</span>}>
-        Phase 3 — Contact Data Fixes
-      </PHead>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:8, padding:12 }}>
-        <KpiCard label="Email Repair"    value={summary.emailRepair}       color={summary.emailRepair>0?C.red:C.green} />
-        <KpiCard label="Missing Persona" value={summary.missingPersona}    color={summary.missingPersona>0?C.amber:C.green} />
-        <KpiCard label="Missing Rep"     value={summary.missingPrimaryRep} color={summary.missingPrimaryRep>0?C.amber:C.green} />
-        <KpiCard label="Missing Phone"   value={summary.missingPhone}      color={C.sub} />
-        <KpiCard label="Missing Entity"  value={summary.missingEntity}     color={C.sub} />
-        <KpiCard label="Auto-Fixable"    value={summary.withProposedValue} color={C.accent} />
-      </div>
-      <div style={{ padding:'0 12px 10px', display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-        {FILTERS.map(f => (
-          <button key={f.key} onClick={() => setFilter(f.key)}
-            style={{ fontSize:11, padding:'4px 10px', borderRadius:4, cursor:'pointer',
-              border:`1px solid ${filter===f.key?C.accent:C.border}`,
-              background:filter===f.key?'rgba(79,142,247,.12)':'transparent',
-              color:filter===f.key?C.accent:C.sub }}>
-            {f.label}
-          </button>
-        ))}
-        <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search contact or company…"
-          style={{ flex:1, minWidth:150, padding:'4px 8px', background:C.card,
-            border:`1px solid ${C.border}`, borderRadius:4, fontSize:11, color:C.text, outline:'none' }} />
-      </div>
-      <div style={{ maxHeight:400, overflowY:'auto' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
-          <thead>
-            <tr style={{ background:C.card }}>
-              {['Contact','Title','Company','Issue','Proposed Fix','Note'].map(h => (
-                <th key={h} style={{ padding:'6px 12px', fontSize:9, fontWeight:600, textTransform:'uppercase',
-                  letterSpacing:'.05em', color:C.muted, borderBottom:`1px solid ${C.border}`, textAlign:'left' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.slice(0,100).map((issue,i) => (
-              <tr key={issue.issueId} style={{ borderBottom:`1px solid ${C.border}` }}
-                onMouseEnter={e => e.currentTarget.style.background=C.card}
-                onMouseLeave={e => e.currentTarget.style.background=''}>
-                <td style={{ padding:'7px 12px', fontWeight:500 }}>
-                  <a href={issue.url} target="_blank" rel="noopener noreferrer" style={{ color:C.accent }}>
-                    {issue.contactName||issue.contactEmail||'—'}
-                  </a>
-                </td>
-                <td style={{ padding:'7px 12px', color:C.sub }}>{issue.contactTitle||'—'}</td>
-                <td style={{ padding:'7px 12px', color:C.sub }}>{issue.companyName}</td>
-                <td style={{ padding:'7px 12px' }}>
-                  <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:typeColor[issue.type]||C.sub }}>
-                    {issue.type.replace(/_/g,' ')}
-                  </span>
-                </td>
-                <td style={{ padding:'7px 12px', color:issue.proposedValue?C.green:C.muted }}>
-                  {issue.proposedValue
-                    ? <><span style={{ fontSize:9, color:C.muted, fontFamily:'IBM Plex Mono' }}>{issue.field}: </span>{issue.proposedValue}</>
-                    : <em style={{ color:C.muted }}>manual</em>
-                  }
-                </td>
-                <td style={{ padding:'7px 12px', color:C.muted, maxWidth:200, overflow:'hidden',
-                  textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={issue.note}>{issue.note}</td>
+    <Card>
+      <CardHead right={<Pill color={C.amber}>{summary.total.toLocaleString()} issues</Pill>}>
+        Step 4 — Contact Data Quality
+      </CardHead>
+
+      <div style={{ padding:16, display:'flex', flexDirection:'column', gap:14 }}>
+        <SummaryGrid items={[
+          { label:'Email Repair',    value:summary.emailRepair,       color:summary.emailRepair>0?C.red:C.green },
+          { label:'No Persona',      value:summary.missingPersona,    color:summary.missingPersona>0?C.amber:C.green },
+          { label:'No Primary Rep',  value:summary.missingPrimaryRep, color:summary.missingPrimaryRep>0?C.amber:C.green },
+          { label:'No Phone',        value:summary.missingPhone,      color:C.sub },
+          { label:'No Entity',       value:summary.missingEntity,     color:C.sub },
+          { label:'Auto-Fixable',    value:summary.withProposedValue, color:C.accent },
+        ]} />
+
+        <Callout type="info">
+          {summary.withProposedValue.toLocaleString()} of {summary.total.toLocaleString()} issues have an automatic proposed fix
+          and will be included in the Contact Issues export ready to import.
+          The remaining {(summary.total - summary.withProposedValue).toLocaleString()} require manual assignment (persona, entity).
+        </Callout>
+
+        {/* Filters + search */}
+        <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
+          {FILTERS.map(f => (
+            <button key={f.key} onClick={() => setFilter(f.key)}
+              style={{ fontSize:11, padding:'4px 11px', borderRadius:20, cursor:'pointer',
+                border:`1px solid ${filter===f.key?C.accent:C.border}`,
+                background:filter===f.key?`${C.accent}18`:'transparent',
+                color:filter===f.key?C.accent:C.sub }}>
+              {f.label}
+            </button>
+          ))}
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name or company…"
+            style={{ flex:1, minWidth:180, padding:'5px 10px', background:C.card,
+              border:`1px solid ${C.border}`, borderRadius:6, fontSize:11, color:C.text, outline:'none' }} />
+        </div>
+
+        {/* Contact table */}
+        <div style={{ border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+            <thead>
+              <tr style={{ background:C.panel }}>
+                {['Contact','Title','Company','Issue','Proposed Fix'].map(h => (
+                  <th key={h} style={{ padding:'8px 12px', fontSize:9, fontWeight:700,
+                    textTransform:'uppercase', letterSpacing:'.06em', color:C.muted,
+                    borderBottom:`1px solid ${C.border}`, textAlign:'left' }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length > 100 && (
-          <div style={{ padding:'8px 14px', fontSize:11, color:C.muted, textAlign:'center' }}>
-            Showing 100 of {filtered.length} — export CSV for full list
-          </div>
-        )}
-        {filtered.length === 0 && (
-          <div style={{ padding:'16px', color:C.sub, textAlign:'center' }}>No issues match filter</div>
-        )}
+            </thead>
+            <tbody>
+              {filtered.slice(0,100).map((issue,i) => (
+                <tr key={issue.issueId} style={{ borderBottom:`1px solid ${C.border}`, cursor:'pointer' }}
+                  onClick={() => window.open(issue.url,'_blank')}
+                  onMouseEnter={e => e.currentTarget.style.background=C.card}
+                  onMouseLeave={e => e.currentTarget.style.background=''}>
+                  <td style={{ padding:'8px 12px', fontWeight:500 }}>
+                    <a href={issue.url} target="_blank" rel="noopener noreferrer"
+                      style={{ color:C.accent }} onClick={e=>e.stopPropagation()}>
+                      {issue.contactName||issue.contactEmail||'—'}
+                    </a>
+                  </td>
+                  <td style={{ padding:'8px 12px', color:C.sub, maxWidth:160,
+                    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
+                    title={issue.contactTitle}>{issue.contactTitle||'—'}</td>
+                  <td style={{ padding:'8px 12px', color:C.sub }}>{issue.companyName}</td>
+                  <td style={{ padding:'8px 12px' }}>
+                    <span style={{ fontSize:10, fontWeight:600,
+                      color:typeColors[issue.type]||C.sub }}>
+                      {typeLabels[issue.type]||issue.type}
+                    </span>
+                  </td>
+                  <td style={{ padding:'8px 12px' }}>
+                    {issue.proposedValue
+                      ? <span style={{ color:C.green }}>
+                          <span style={{ fontSize:9, color:C.muted, fontFamily:'IBM Plex Mono' }}>{issue.field}: </span>
+                          {issue.proposedValue}
+                        </span>
+                      : <span style={{ color:C.muted, fontStyle:'italic' }}>needs manual review</span>
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length > 100 && (
+            <div style={{ padding:'9px 12px', fontSize:11, color:C.muted, textAlign:'center',
+              background:C.panel, borderTop:`1px solid ${C.border}` }}>
+              Showing 100 of {filtered.length.toLocaleString()} — download the full Contact Issues CSV for the complete list
+            </div>
+          )}
+          {filtered.length === 0 && (
+            <div style={{ padding:'20px', color:C.sub, textAlign:'center' }}>No issues match this filter</div>
+          )}
+        </div>
       </div>
-    </Panel>
+    </Card>
   )
 }
 
-// ─── Phase 4 ─────────────────────────────────────────────────────────────────
-function Phase4Panel({ data }) {
+// ─── Step 4: Stale ────────────────────────────────────────────────────────────
+function Step4({ data }) {
   if (!data) return null
   const { records, summary } = data
+
   const statusColor = { NEVER_CONTACTED:C.red, STALE_1YEAR:C.red, STALE_6MONTHS:C.amber, STALE_90DAYS:C.amber, ACTIVE:C.green }
-  const statusLabel = { NEVER_CONTACTED:'Never', STALE_1YEAR:'1yr+', STALE_6MONTHS:'6mo+', STALE_90DAYS:'90d+', ACTIVE:'Active' }
+  const statusLabel = { NEVER_CONTACTED:'Never contacted', STALE_1YEAR:'Over a year', STALE_6MONTHS:'6+ months', STALE_90DAYS:'90+ days', ACTIVE:'Active' }
+
+  const concerning = records.filter(r => r.status !== 'ACTIVE')
 
   return (
-    <Panel>
-      <PHead right={<span style={{ fontSize:11, color:C.sub }}>{records.length} accounts</span>}>
-        Phase 4 — Stale Record Flagging
-      </PHead>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:8, padding:12 }}>
-        <KpiCard label="Never Contacted" value={summary.neverContacted} color={C.red} />
-        <KpiCard label="Stale 1yr+"      value={summary.stale1Year}     color={C.red} />
-        <KpiCard label="Stale 6mo+"      value={summary.stale6Months}   color={C.amber} />
-        <KpiCard label="Stale 90d+"      value={summary.stale90Days}    color={C.amber} />
-        <KpiCard label="Active"          value={summary.active}         color={C.green} />
+    <Card>
+      <CardHead right={
+        concerning.length > 0
+          ? <Pill color={C.amber}>{concerning.length} accounts need attention</Pill>
+          : <Pill color={C.green}>All active</Pill>
+      }>Step 5 — Activity & Staleness</CardHead>
+
+      <div style={{ padding:16, display:'flex', flexDirection:'column', gap:14 }}>
+        <SummaryGrid items={[
+          { label:'Never Contacted', value:summary.neverContacted, color:summary.neverContacted>0?C.red:C.green },
+          { label:'Stale 1yr+',      value:summary.stale1Year,     color:summary.stale1Year>0?C.red:C.green },
+          { label:'Stale 6mo+',      value:summary.stale6Months,   color:summary.stale6Months>0?C.amber:C.green },
+          { label:'Stale 90d+',      value:summary.stale90Days,    color:summary.stale90Days>0?C.amber:C.green },
+          { label:'Active',          value:summary.active,         color:C.green },
+        ]} />
+
+        {concerning.length > 0 && (
+          <div>
+            <div style={{ fontSize:12, fontWeight:600, marginBottom:8 }}>Accounts needing attention</div>
+            <div style={{ border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                <thead>
+                  <tr style={{ background:C.panel }}>
+                    {['Account','Tier','BDR','Contacts','Last activity','Status'].map(h => (
+                      <th key={h} style={{ padding:'8px 12px', fontSize:9, fontWeight:700,
+                        textTransform:'uppercase', letterSpacing:'.06em', color:C.muted,
+                        borderBottom:`1px solid ${C.border}`, textAlign:'left' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {concerning.map((r,i) => (
+                    <tr key={i} style={{ borderBottom:`1px solid ${C.border}` }}
+                      onMouseEnter={e => e.currentTarget.style.background=C.card}
+                      onMouseLeave={e => e.currentTarget.style.background=''}>
+                      <td style={{ padding:'8px 12px', fontWeight:500 }}>
+                        <a href={r.url} target="_blank" rel="noopener noreferrer"
+                          style={{ color:C.accent }}>{r.name}</a>
+                      </td>
+                      <td style={{ padding:'8px 12px', color:C.sub, fontFamily:'IBM Plex Mono', fontSize:10 }}>{r.tier?.replace('GOLD - ','')}</td>
+                      <td style={{ padding:'8px 12px', color:C.sub }}>{r.assignedBdr||'—'}</td>
+                      <td style={{ padding:'8px 12px' }}>{r.contacts}</td>
+                      <td style={{ padding:'8px 12px', color:C.sub }}>
+                        {r.lastActivity ? new Date(r.lastActivity).toLocaleDateString() : 'Never'}
+                        {r.daysSince != null && <span style={{ color:C.muted, marginLeft:6 }}>({r.daysSince}d ago)</span>}
+                      </td>
+                      <td style={{ padding:'8px 12px' }}>
+                        <span style={{ fontSize:10, fontWeight:600, color:statusColor[r.status] }}>
+                          {statusLabel[r.status]}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {concerning.length === 0 && (
+          <Callout type="success">✓ All Gold accounts have had activity within the last 90 days.</Callout>
+        )}
       </div>
-      <div style={{ maxHeight:400, overflowY:'auto' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
-          <thead>
-            <tr style={{ background:C.card }}>
-              {['Account','Tier','BDR','Contacts','Days Inactive','Last Activity','Status'].map(h => (
-                <th key={h} style={{ padding:'6px 12px', fontSize:9, fontWeight:600, textTransform:'uppercase',
-                  letterSpacing:'.05em', color:C.muted, borderBottom:`1px solid ${C.border}`, textAlign:'left' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {records.map((r,i) => (
-              <tr key={i} style={{ borderBottom:`1px solid ${C.border}` }}
-                onMouseEnter={e => e.currentTarget.style.background=C.card}
-                onMouseLeave={e => e.currentTarget.style.background=''}>
-                <td style={{ padding:'7px 12px', fontWeight:500 }}>
-                  <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ color:C.accent }}>{r.name}</a>
-                </td>
-                <td style={{ padding:'7px 12px', color:C.sub, fontFamily:'IBM Plex Mono', fontSize:10 }}>{r.tier}</td>
-                <td style={{ padding:'7px 12px', color:C.sub }}>{r.assignedBdr||'—'}</td>
-                <td style={{ padding:'7px 12px' }}>{r.contacts}</td>
-                <td style={{ padding:'7px 12px', fontFamily:'IBM Plex Mono', fontWeight:600,
-                  color:statusColor[r.status] }}>{r.daysSince!=null?`${r.daysSince}d`:'Never'}</td>
-                <td style={{ padding:'7px 12px', color:C.muted }}>{r.lastActivity?new Date(r.lastActivity).toLocaleDateString():'—'}</td>
-                <td style={{ padding:'7px 12px' }}>
-                  <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', color:statusColor[r.status] }}>
-                    {statusLabel[r.status]}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Panel>
+    </Card>
   )
 }
 
@@ -655,111 +657,108 @@ function ExportPanel({ scanResult }) {
   const [exporting, setExporting] = useState({})
 
   const doExport = async (type, filename) => {
-    setExporting(p => ({ ...p, [type]:true }))
+    setExporting(p => ({...p,[type]:true}))
     try {
       const res = await fetch('/api/dq-export', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
+        method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ type, scanResult }),
       })
       if (!res.ok) throw new Error('Export failed')
       const blob = await res.blob()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = filename
-      a.click()
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+      a.download = filename; a.click()
     } catch(e) { alert('Export error: ' + e.message) }
-    finally { setExporting(p => ({ ...p, [type]:false })) }
+    finally { setExporting(p => ({...p,[type]:false})) }
   }
 
   const d = new Date().toISOString().slice(0,10)
-
   const EXPORTS = [
-    { type:'field-updates', label:'Field Updates CSV', icon:'📥',
-      desc:'Import directly into HubSpot. Contains company_type, parent_system_name, primary_outreach_rep, vendor tagging, and all other field updates.',
-      action:'Import → HubSpot Settings → Import → Companies/Contacts', filename:`cipher-dq-field-updates-${d}.csv`, variant:'primary' },
-    { type:'merge-list', label:'Merge List', icon:'🔀',
-      desc:'Company pairs to merge manually. Open each in HubSpot → Actions → Merge.',
-      action:'Manual: HubSpot UI merge tool', filename:`cipher-dq-merge-list-${d}.csv` },
-    { type:'parent-child', label:'Parent/Child Associations', icon:'🌳',
-      desc:'Subsidiaries that need a Parent Company set. Open each record in HubSpot → Company Information → Parent Company.',
-      action:'Manual: HubSpot UI per record', filename:`cipher-dq-parent-child-${d}.csv` },
-    { type:'vendor-list', label:'Vendor Exclusion List', icon:'🚫',
-      desc:'Companies and contacts flagged as vendors — review before tagging. Included in Field Updates CSV once confirmed.',
-      action:'Review then import', filename:`cipher-dq-vendor-list-${d}.csv` },
-    { type:'phase3-full', label:'Contact Issues (Full)', icon:'👤',
-      desc:'All Phase 3 contact issues — missing personas, reps, phones, emails, domain mismatches.',
-      action:'Review + Import', filename:`cipher-dq-contacts-${d}.csv` },
-    { type:'email-repair', label:'Email Repair Targets', icon:'📧',
-      desc:'Contacts with bounced or missing emails. Priority list for ZoomInfo enrichment or web search.',
-      action:'ZoomInfo lookup or manual research', filename:`cipher-dq-email-repair-${d}.csv` },
-    { type:'stale', label:'Stale Records', icon:'🕰',
-      desc:'Phase 4 stale accounts sorted by days since activity.',
-      action:'Review and action', filename:`cipher-dq-stale-${d}.csv` },
+    { type:'field-updates', icon:'📥', label:'Field Updates',
+      desc:'Imports directly into HubSpot. Covers company_type, parent_system_name, primary_outreach_rep, vendor tags, and all auto-fixable field updates.',
+      action:'HubSpot → Settings → Import → select file', primary:true, filename:`cipher-dq-field-updates-${d}.csv` },
+    { type:'merge-list', icon:'🔀', label:'Merge List',
+      desc:'Duplicate company pairs to merge. Open each in HubSpot → Actions → Merge.',
+      action:'Manual action in HubSpot UI', filename:`cipher-dq-merge-list-${d}.csv` },
+    { type:'parent-child', icon:'🌳', label:'Parent/Child Associations',
+      desc:'Subsidiaries needing a parent company set. Open each record → Company Information → Parent Company.',
+      action:'Manual action in HubSpot UI', filename:`cipher-dq-parent-child-${d}.csv` },
+    { type:'vendor-list', icon:'🚫', label:'Vendor Review List',
+      desc:'Companies and contacts flagged as vendors. Review before tagging — included in Field Updates once confirmed.',
+      action:'Review then import', filename:`cipher-dq-vendors-${d}.csv` },
+    { type:'phase3-full', icon:'👤', label:'Contact Issues',
+      desc:'All contact data issues — missing personas, reps, phones, emails, domain mismatches.',
+      action:'Review + import to HubSpot', filename:`cipher-dq-contacts-${d}.csv` },
+    { type:'email-repair', icon:'📧', label:'Email Repair Targets',
+      desc:'Contacts with bounced or missing emails. Priority list for ZoomInfo lookup.',
+      action:'ZoomInfo enrichment or manual research', filename:`cipher-dq-email-repair-${d}.csv` },
+    { type:'stale', icon:'🕰', label:'Stale Records',
+      desc:'Accounts sorted by days since last activity.',
+      action:'Review and assign follow-up actions', filename:`cipher-dq-stale-${d}.csv` },
   ]
 
   return (
-    <Panel>
-      <PHead>Export Files</PHead>
-      <div style={{ padding:12, display:'flex', flexDirection:'column', gap:8 }}>
-        <InfoBox>
-          Download all files and review before actioning. The Field Updates CSV is the only one that imports directly into HubSpot.
-          Everything else (merges, parent/child associations) requires manual action in HubSpot UI.
-        </InfoBox>
+    <Card>
+      <CardHead>Downloads & Exports</CardHead>
+      <div style={{ padding:16, display:'flex', flexDirection:'column', gap:8 }}>
+        <Callout type="info">
+          The Field Updates file is the only one that imports directly into HubSpot.
+          Everything else (merges, parent/child associations) requires a manual action in HubSpot.
+          Review all files before taking action.
+        </Callout>
         {EXPORTS.map(exp => (
-          <div key={exp.type} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 12px',
-            background:C.card, border:`1px solid ${C.border}`, borderRadius:8 }}>
-            <span style={{ fontSize:20, flexShrink:0 }}>{exp.icon}</span>
+          <div key={exp.type} style={{ display:'flex', alignItems:'center', gap:14, padding:'12px 14px',
+            background:C.card, border:`1px solid ${exp.primary?C.accent:C.border}`, borderRadius:9 }}>
+            <span style={{ fontSize:22, flexShrink:0 }}>{exp.icon}</span>
             <div style={{ flex:1 }}>
-              <div style={{ fontSize:12, fontWeight:600 }}>{exp.label}</div>
-              <div style={{ fontSize:11, color:C.sub, marginTop:2 }}>{exp.desc}</div>
-              <div style={{ fontSize:10, color:C.accent, marginTop:4 }}>Action: {exp.action}</div>
+              <div style={{ fontSize:13, fontWeight:600, marginBottom:2 }}>{exp.label}</div>
+              <div style={{ fontSize:11, color:C.sub }}>{exp.desc}</div>
+              <div style={{ fontSize:10, color:exp.primary?C.accent:C.muted, marginTop:4 }}>
+                {exp.action}
+              </div>
             </div>
-            <Btn variant={exp.variant||'default'} disabled={!scanResult||exporting[exp.type]}
+            <Btn variant={exp.primary?'primary':'default'} disabled={!scanResult||exporting[exp.type]}
               onClick={() => doExport(exp.type, exp.filename)}>
-              {exporting[exp.type]?'Exporting…':'Download CSV'}
+              {exporting[exp.type]?'Exporting…':'Download'}
             </Btn>
           </div>
         ))}
       </div>
-    </Panel>
+    </Card>
   )
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const { isLoaded, isSignedIn, userId } = useAuth()
-  const [scanning, setScanning]   = useState(false)
-  const [scanResult, setScanResult] = useState(null)
-  const [error, setError]         = useState(null)
-  const [approved, setApproved]   = useState({})
-  const [activePhase, setActivePhase] = useState('overview')
-  const [progress, setProgress]   = useState('')
-  const [scope, setScope]         = useState('gold')
+  const [scanning, setScanning]         = useState(false)
+  const [scanResult, setScanResult]     = useState(null)
+  const [error, setError]               = useState(null)
+  const [approved, setApproved]         = useState({})
+  const [activeStep, setActiveStep]     = useState('overview')
+  const [progress, setProgress]         = useState('')
+  const [scope, setScope]               = useState('gold')
 
   const runScan = useCallback(async () => {
     setScanning(true); setError(null); setScanResult(null); setApproved({})
     try {
-      setProgress('Getting HubSpot token…')
+      setProgress('Connecting to HubSpot…')
       const tRes = await fetch(`/api/dq-token?userId=${userId}`)
-      if (!tRes.ok) { const e = await tRes.json(); throw new Error(e.error||'Token error — authorize via Cipher first') }
+      if (!tRes.ok) { const e = await tRes.json(); throw new Error(e.error||'Token error — sign into Cipher first') }
       const { token } = await tRes.json()
 
-      setProgress(scope==='gold' ? 'Fetching Gold accounts…' : 'Fetching all CRM companies (this may take a minute)…')
-      const sRes = await fetch(`/api/dq-scan?scope=${scope}`, { headers:{ 'x-hs-token':token } })
+      setProgress(scope==='gold' ? 'Scanning Gold accounts…' : 'Scanning full CRM — this may take a minute…')
+      const sRes = await fetch(`/api/dq-scan?scope=${scope}`, { headers:{'x-hs-token':token} })
       if (!sRes.ok) { const e = await sRes.json(); throw new Error(e.error||'Scan failed') }
 
-      setProgress('Processing results…')
+      setProgress('Analyzing results…')
       const data = await sRes.json()
-      setScanResult(data)
-      setActivePhase('overview')
-      setProgress('')
+      setScanResult(data); setActiveStep('overview'); setProgress('')
     } catch(e) { setError(e.message); setProgress('') }
     finally { setScanning(false) }
   }, [userId, scope])
 
   const handleApprove = useCallback((id, item) => {
-    setApproved(p => ({ ...p, [id]:item }))
+    setApproved(p => ({...p,[id]:item}))
   }, [])
 
   if (!isLoaded) return <div style={{ display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',color:C.muted }}>Loading…</div>
@@ -771,13 +770,13 @@ export default function App() {
   const p3 = scanResult?.phase3?.summary
   const p4 = scanResult?.phase4?.summary
 
-  const PHASES = [
-    { key:'overview', label:'Overview' },
-    { key:'0', label:'Phase 0 · Pre-Filter', count:p0?.totalExcluded },
-    { key:'1', label:'Phase 1 · Dedup',      count:p1?.duplicateNames },
-    { key:'2', label:'Phase 2 · Hierarchy',  count:p2?.total },
-    { key:'3', label:'Phase 3 · Contacts',   count:p3?.total },
-    { key:'4', label:'Phase 4 · Stale',      count:(p4?.neverContacted||0)+(p4?.stale1Year||0) },
+  const STEPS = [
+    { key:'overview',  label:'Overview' },
+    { key:'0',  label:'Pre-Filter',  count:p0?.totalExcluded },
+    { key:'1',  label:'Duplicates',  count:p1?.duplicateNames },
+    { key:'2',  label:'Hierarchy',   count:p2?.total },
+    { key:'3',  label:'Contacts',    count:p3?.total },
+    { key:'4',  label:'Stale',       count:(p4?.neverContacted||0)+(p4?.stale1Year||0) },
     { key:'export', label:'Export' },
   ]
 
@@ -789,45 +788,45 @@ export default function App() {
         {/* Header */}
         <div style={{ background:C.panel, borderBottom:`1px solid ${C.border}`, padding:'0 24px',
           display:'flex', alignItems:'center', gap:16, height:52, position:'sticky', top:0, zIndex:100 }}>
-          <span style={{ fontSize:13, fontWeight:700, fontFamily:'IBM Plex Mono', color:C.accent }}>CIPHER</span>
-          <span style={{ fontSize:11, color:C.border }}>|</span>
-          <span style={{ fontSize:11, fontWeight:500, color:C.sub, textTransform:'uppercase', letterSpacing:'.06em' }}>Data Quality</span>
+          <span style={{ fontSize:13, fontWeight:700, fontFamily:'IBM Plex Mono', color:C.accent, letterSpacing:'.04em' }}>CIPHER</span>
+          <span style={{ color:C.border }}>|</span>
+          <span style={{ fontSize:11, fontWeight:500, color:C.sub, textTransform:'uppercase', letterSpacing:'.08em' }}>Data Quality</span>
           <div style={{ flex:1 }} />
           {scanResult && (
             <span style={{ fontSize:11, color:C.muted, fontFamily:'IBM Plex Mono' }}>
-              {scanResult.activeCompanies} active · {scanResult.totalCompanies} total · scanned {new Date(scanResult.scannedAt).toLocaleTimeString()}
+              {scanResult.activeCompanies} active · {scanResult.totalCompanies} total
+              {scanResult.totalContacts ? ` · ${scanResult.totalContacts.toLocaleString()} contacts` : ''}
+              · {new Date(scanResult.scannedAt).toLocaleTimeString()}
             </span>
           )}
-          {/* Scope selector */}
           <div style={{ display:'flex', background:C.card, border:`1px solid ${C.border}`, borderRadius:6, padding:2, gap:1 }}>
-            {[{v:'gold',l:'Gold Only'},{v:'all',l:'Full CRM'}].map(({v,l}) => (
+            {[{v:'gold',l:'Gold accounts'},{v:'all',l:'Full CRM'}].map(({v,l}) => (
               <button key={v} onClick={() => setScope(v)}
                 style={{ padding:'4px 12px', border:'none', borderRadius:4, fontSize:11, cursor:'pointer',
-                  background:scope===v?C.border:'transparent', color:scope===v?C.text:C.sub,
-                  fontWeight:scope===v?500:400 }}>
-                {l}
-              </button>
+                  background:scope===v?C.borderHi:'transparent', color:scope===v?C.text:C.sub,
+                  fontWeight:scope===v?600:400 }}>{l}</button>
             ))}
           </div>
           <Btn variant={scanning?'ghost':'primary'} disabled={scanning} onClick={runScan}>
-            {scanning ? progress||'Scanning…' : scanResult ? 'Re-scan' : 'Run Scan'}
+            {scanning ? progress||'Scanning…' : scanResult ? '↻ Re-scan' : 'Run Scan'}
           </Btn>
         </div>
 
-        {/* Phase nav */}
+        {/* Step nav */}
         {scanResult && (
-          <div style={{ background:C.panel, borderBottom:`1px solid ${C.border}`, padding:'0 24px', display:'flex', gap:0 }}>
-            {PHASES.map(ph => (
-              <button key={ph.key} onClick={() => setActivePhase(ph.key)}
-                style={{ padding:'10px 14px', background:'none', border:'none', cursor:'pointer',
-                  fontSize:12, fontWeight:activePhase===ph.key?600:400,
-                  color:activePhase===ph.key?C.text:C.sub,
-                  borderBottom:activePhase===ph.key?`2px solid ${C.accent}`:'2px solid transparent',
-                  display:'flex', alignItems:'center', gap:5 }}>
-                {ph.label}
-                {ph.count>0 && (
-                  <span style={{ fontSize:9, fontWeight:700, padding:'1px 5px', borderRadius:8,
-                    background:'rgba(79,142,247,.2)', color:C.accent }}>{ph.count}</span>
+          <div style={{ background:C.panel, borderBottom:`1px solid ${C.border}`,
+            padding:'0 24px', display:'flex', gap:0, overflowX:'auto' }}>
+            {STEPS.map(step => (
+              <button key={step.key} onClick={() => setActiveStep(step.key)}
+                style={{ padding:'10px 16px', background:'none', border:'none', cursor:'pointer',
+                  fontSize:12, fontWeight:activeStep===step.key?600:400, whiteSpace:'nowrap',
+                  color:activeStep===step.key?C.text:C.sub,
+                  borderBottom:activeStep===step.key?`2px solid ${C.accent}`:'2px solid transparent',
+                  display:'flex', alignItems:'center', gap:6 }}>
+                {step.label}
+                {step.count > 0 && (
+                  <span style={{ fontSize:10, fontWeight:700, padding:'1px 6px', borderRadius:10,
+                    background:`${C.accent}22`, color:C.accent }}>{step.count}</span>
                 )}
               </button>
             ))}
@@ -835,44 +834,46 @@ export default function App() {
         )}
 
         {/* Content */}
-        <div style={{ flex:1, padding:24, display:'flex', flexDirection:'column', gap:16, maxWidth:1400, margin:'0 auto', width:'100%' }}>
+        <div style={{ flex:1, padding:24, display:'flex', flexDirection:'column', gap:16,
+          maxWidth:1300, margin:'0 auto', width:'100%' }}>
 
-          {/* Empty */}
+          {/* Empty state */}
           {!scanResult && !scanning && !error && (
-            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-              flex:1, gap:20, paddingTop:80 }}>
-              <div style={{ fontSize:32 }}>🔍</div>
-              <div style={{ textAlign:'center' }}>
-                <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Cipher Data Quality</div>
-                <div style={{ fontSize:13, color:C.sub, maxWidth:440, lineHeight:1.7 }}>
-                  Full CRM cleanup tool. Scans companies and contacts in HubSpot,
-                  identifies issues, proposes fixes, and exports review-ready CSVs.
-                  Read-only — nothing writes to HubSpot without you importing the file.
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
+              justifyContent:'center', flex:1, gap:24, paddingTop:60 }}>
+              <div style={{ textAlign:'center', maxWidth:500 }}>
+                <div style={{ fontSize:24, fontWeight:700, marginBottom:10, letterSpacing:'-.02em' }}>
+                  Cipher Data Quality
+                </div>
+                <div style={{ fontSize:14, color:C.sub, lineHeight:1.7 }}>
+                  Scans your HubSpot companies and contacts, identifies data issues,
+                  and produces clean import-ready files. Read-only — nothing changes
+                  in HubSpot until you import a file yourself.
                 </div>
               </div>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10, maxWidth:820 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10, maxWidth:760 }}>
                 {[
-                  { icon:'🚫', title:'Phase 0', desc:'Pre-filter vendors + retired contacts' },
-                  { icon:'🔁', title:'Phase 1', desc:'Company dedup + domain cleanup' },
-                  { icon:'🌳', title:'Phase 2', desc:'Parent/subsidiary hierarchy' },
-                  { icon:'👤', title:'Phase 3', desc:'Contact data fixes + email repair' },
-                  { icon:'🕰', title:'Phase 4', desc:'Stale record flagging' },
-                ].map(p => (
-                  <div key={p.title} style={{ padding:'14px', background:C.card, border:`1px solid ${C.border}`,
-                    borderRadius:8, textAlign:'center' }}>
-                    <div style={{ fontSize:22, marginBottom:6 }}>{p.icon}</div>
-                    <div style={{ fontSize:12, fontWeight:600, marginBottom:4 }}>{p.title}</div>
-                    <div style={{ fontSize:11, color:C.sub }}>{p.desc}</div>
+                  { icon:'🚫', step:'Step 1', desc:'Pre-filter vendors & retired contacts' },
+                  { icon:'🔁', step:'Step 2', desc:'Find and flag duplicate companies' },
+                  { icon:'🌳', step:'Step 3', desc:'Map parent/subsidiary hierarchy' },
+                  { icon:'👤', step:'Step 4', desc:'Fix contact data & missing fields' },
+                  { icon:'🕰', step:'Step 5', desc:'Flag stale & never-contacted accounts' },
+                ].map(s => (
+                  <div key={s.step} style={{ padding:'16px 14px', background:C.card,
+                    border:`1px solid ${C.border}`, borderRadius:10, textAlign:'center' }}>
+                    <div style={{ fontSize:24, marginBottom:8 }}>{s.icon}</div>
+                    <div style={{ fontSize:11, fontWeight:700, color:C.accent, marginBottom:4, textTransform:'uppercase', letterSpacing:'.04em' }}>{s.step}</div>
+                    <div style={{ fontSize:11, color:C.sub, lineHeight:1.5 }}>{s.desc}</div>
                   </div>
                 ))}
               </div>
-              <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+              <div style={{ display:'flex', gap:10, alignItems:'center' }}>
                 <div style={{ display:'flex', background:C.card, border:`1px solid ${C.border}`, borderRadius:6, padding:2 }}>
-                  {[{v:'gold',l:'Start with Gold Accounts'},{v:'all',l:'Full CRM'}].map(({v,l}) => (
+                  {[{v:'gold',l:'Start with Gold accounts'},{v:'all',l:'Full CRM'}].map(({v,l}) => (
                     <button key={v} onClick={() => setScope(v)}
                       style={{ padding:'6px 16px', border:'none', borderRadius:4, fontSize:12, cursor:'pointer',
-                        background:scope===v?C.border:'transparent', color:scope===v?C.text:C.sub,
-                        fontWeight:scope===v?500:400 }}>{l}</button>
+                        background:scope===v?C.borderHi:'transparent', color:scope===v?C.text:C.sub,
+                        fontWeight:scope===v?600:400 }}>{l}</button>
                   ))}
                 </div>
                 <Btn variant="primary" onClick={runScan}>Run Scan →</Btn>
@@ -880,52 +881,55 @@ export default function App() {
             </div>
           )}
 
-          {error && (
-            <div style={{ padding:14, background:'rgba(240,82,82,.08)', border:'1px solid rgba(240,82,82,.25)', borderRadius:8, color:C.red }}>
-              ✗ {error}
-            </div>
-          )}
+          {error && <Callout type="error">✗ {error}</Callout>}
 
           {scanning && (
-            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-              flex:1, gap:16, paddingTop:80 }}>
-              <div style={{ fontSize:28, animation:'spin 1s linear infinite' }}>⟳</div>
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
+              justifyContent:'center', flex:1, gap:14, paddingTop:60 }}>
+              <div style={{ fontSize:26, opacity:.7 }}>⟳</div>
               <div style={{ fontSize:14, fontWeight:500 }}>{progress||'Scanning…'}</div>
               <div style={{ fontSize:12, color:C.sub }}>
-                {scope==='all'
-                  ? 'Scanning full CRM — fetching companies and contacts. This may take 60–90 seconds.'
-                  : 'Scanning Gold accounts. This may take 30–45 seconds.'
-                }
+                {scope==='all' ? 'Scanning full CRM — 60–90 seconds.' : 'Scanning Gold accounts — 30–45 seconds.'}
               </div>
             </div>
           )}
 
           {scanResult && !scanning && (
             <>
-              {activePhase === 'overview' && (
-                <>
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:10 }}>
-                    <KpiCard label="Companies Scanned" value={scanResult.totalCompanies} />
-                    <KpiCard label="Active (non-vendor)" value={scanResult.activeCompanies} color={C.green} />
-                    <KpiCard label="Contacts Scanned"   value={scanResult.totalContacts||'—'} />
-                    <KpiCard label="P1 Issues"  value={p1?.duplicateNames||0} color={(p1?.duplicateNames||0)>0?C.amber:C.green} />
-                    <KpiCard label="P2 Proposals" value={p2?.total||0}       color={(p2?.total||0)>0?C.accent:C.green} />
-                    <KpiCard label="P3 Contacts" value={p3?.total||0}        color={(p3?.total||0)>0?C.amber:C.green} />
+              {activeStep === 'overview' && (
+                <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                  {/* Summary bar */}
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:1,
+                    background:C.border, borderRadius:10, overflow:'hidden' }}>
+                    {[
+                      { label:'Companies', value:scanResult.totalCompanies },
+                      { label:'Active', value:scanResult.activeCompanies, color:C.green },
+                      { label:'Contacts', value:(scanResult.totalContacts||0).toLocaleString() },
+                      { label:'Dedup issues', value:p1?.duplicateNames||0, color:(p1?.duplicateNames||0)>0?C.amber:C.green },
+                      { label:'Contact issues', value:(p3?.total||0).toLocaleString(), color:(p3?.total||0)>0?C.amber:C.green },
+                      { label:'Stale accounts', value:(p4?.neverContacted||0)+(p4?.stale1Year||0), color:((p4?.neverContacted||0)+(p4?.stale1Year||0))>0?C.red:C.green },
+                    ].map((s,i) => (
+                      <div key={i} style={{ background:C.card, padding:'14px 16px', textAlign:'center' }}>
+                        <div style={{ fontSize:22, fontWeight:700, fontFamily:'IBM Plex Mono',
+                          color:s.color||C.text, marginBottom:4 }}>{s.value}</div>
+                        <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:'.04em' }}>{s.label}</div>
+                      </div>
+                    ))}
                   </div>
-                  <Phase0Panel data={scanResult.phase0} />
-                  <Phase1Panel data={scanResult.phase1} approved={approved} onApprove={handleApprove} />
-                  <Phase2Panel data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />
-                  <Phase3Panel data={scanResult.phase3} />
-                  <Phase4Panel data={scanResult.phase4} />
+                  <Step0 data={scanResult.phase0} />
+                  <Step1 data={scanResult.phase1} approved={approved} onApprove={handleApprove} />
+                  <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />
+                  <Step3 data={scanResult.phase3} />
+                  <Step4 data={scanResult.phase4} />
                   <ExportPanel scanResult={scanResult} />
-                </>
+                </div>
               )}
-              {activePhase === '0' && <Phase0Panel data={scanResult.phase0} />}
-              {activePhase === '1' && <Phase1Panel data={scanResult.phase1} approved={approved} onApprove={handleApprove} />}
-              {activePhase === '2' && <Phase2Panel data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />}
-              {activePhase === '3' && <Phase3Panel data={scanResult.phase3} />}
-              {activePhase === '4' && <Phase4Panel data={scanResult.phase4} />}
-              {activePhase === 'export' && <ExportPanel scanResult={scanResult} />}
+              {activeStep === '0' && <Step0 data={scanResult.phase0} />}
+              {activeStep === '1' && <Step1 data={scanResult.phase1} approved={approved} onApprove={handleApprove} />}
+              {activeStep === '2' && <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />}
+              {activeStep === '3' && <Step3 data={scanResult.phase3} />}
+              {activeStep === '4' && <Step4 data={scanResult.phase4} />}
+              {activeStep === 'export' && <ExportPanel scanResult={scanResult} />}
             </>
           )}
         </div>
