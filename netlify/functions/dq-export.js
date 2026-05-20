@@ -133,7 +133,7 @@ export default async (req) => {
         rows.push(["", "No company updates to apply", "", "", ""]);
       }
 
-      return csvResponse(csvFile(rows), `cipher-dq-company-updates-${date}.csv`);
+      return csvResponse(csvFile(rows), `UPLOAD-TO-HUBSPOT-companies-${date}.csv`);
     }
 
     // ── CONTACT FIELD UPDATES ─────────────────────────────────────────────────
@@ -183,7 +183,7 @@ export default async (req) => {
         rows.push(["", "", "", "", "No contact updates with valid proposed values", "", ""]);
       }
 
-      return csvResponse(csvFile(rows), `cipher-dq-contact-updates-${date}.csv`);
+      return csvResponse(csvFile(rows), `UPLOAD-TO-HUBSPOT-contacts-${date}.csv`);
     }
 
     // ── MERGE LIST ────────────────────────────────────────────────────────────
@@ -201,7 +201,7 @@ export default async (req) => {
         }
       }
       if (rows.length === 1) rows.push(["", "No duplicate companies found", "", "", "", "", "", "", "", "", ""]);
-      return csvResponse(csvFile(rows), `cipher-dq-merge-list-${date}.csv`);
+      return csvResponse(csvFile(rows), `REVIEW-merge-list-${date}.csv`);
     }
 
     // ── PARENT/CHILD ASSOCIATIONS ─────────────────────────────────────────────
@@ -220,7 +220,7 @@ export default async (req) => {
         ]);
       }
       if (rows.length === 1) rows.push(["", "No parent/child relationships to set", "", "", "", "", "", "", ""]);
-      return csvResponse(csvFile(rows), `cipher-dq-parent-child-${date}.csv`);
+      return csvResponse(csvFile(rows), `REVIEW-parent-child-${date}.csv`);
     }
 
     // ── VENDOR REVIEW LIST ────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ export default async (req) => {
         ]);
       }
       if (rows.length === 1) rows.push(["", "No vendor companies detected", "", "", "", ""]);
-      return csvResponse(csvFile(rows), `cipher-dq-vendor-review-${date}.csv`);
+      return csvResponse(csvFile(rows), `REVIEW-vendor-list-${date}.csv`);
     }
 
     // ── CONTACT ISSUES (FULL LIST) ────────────────────────────────────────────
@@ -261,7 +261,7 @@ export default async (req) => {
         ]);
       }
       if (rows.length === 1) rows.push(["", "No contact issues found", "", "", "", "", "", "", "", ""]);
-      return csvResponse(csvFile(rows), `cipher-dq-contact-issues-${date}.csv`);
+      return csvResponse(csvFile(rows), `REVIEW-contact-issues-${date}.csv`);
     }
 
     // ── EMAIL REPAIR TARGETS ──────────────────────────────────────────────────
@@ -274,7 +274,7 @@ export default async (req) => {
         rows.push([i.contactId, i.contactName, i.contactEmail || "", i.contactTitle || "", i.companyName, i.tier, i.note || "", i.url]);
       }
       if (rows.length === 1) rows.push(["", "No email repair targets found", "", "", "", "", "", ""]);
-      return csvResponse(csvFile(rows), `cipher-dq-email-repair-${date}.csv`);
+      return csvResponse(csvFile(rows), `REVIEW-email-repair-${date}.csv`);
     }
 
     // ── ACTIVITY STATUS ───────────────────────────────────────────────────────
@@ -296,7 +296,7 @@ export default async (req) => {
           r.url,
         ]);
       }
-      return csvResponse(csvFile(rows), `cipher-dq-activity-status-${date}.csv`);
+      return csvResponse(csvFile(rows), `REVIEW-activity-status-${date}.csv`);
     }
 
     return new Response(JSON.stringify({ error: "Unknown export type" }), { status: 400, headers: CORS });
