@@ -625,14 +625,21 @@ function PersonaPanel({ scanResult, onPersonaResults }) {
   const [search, setSearch]           = useState('')
 
   // Build contact list from Phase 3 missing-persona issues
+  // Build company_type lookup from scan results — use String keys for consistency
+  const companyTypeMap = Object.fromEntries(
+    (scanResult?.companies || []).map(c => [String(c.id), c.company_type || ''])
+  )
+
+  // Deduplicate — one entry per contact, with company_type from company lookup
+  const contactsSeen = new Set()
   const contacts = (scanResult?.phase3?.issues || [])
-    .filter(i => i.type === 'MISSING_PERSONA')
+    .filter(i => i.type === 'MISSING_PERSONA' && !contactsSeen.has(i.contactId) && contactsSeen.add(i.contactId))
     .map(i => ({
       id: i.contactId,
       name: i.contactName,
       jobtitle: i.contactTitle || '',
       companyName: i.companyName,
-      company_type: '', // enriched by scan
+      company_type: companyTypeMap[String(i.companyId)] || '',
     }))
 
   const runInference = async (forceRefresh = false) => {
