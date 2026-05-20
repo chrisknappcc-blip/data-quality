@@ -1,6 +1,7 @@
 // ─── Token Bridge ─────────────────────────────────────────────────────────────
 // Reads the HubSpot OAuth token stored by Cipher in Azure Blob Storage.
-// Uses AZURE_STORAGE_ACCOUNT_NAME + AZURE_STORAGE_SAS_TOKEN (same as Cipher).
+// Token blob structure: { hubspot: { access_token, refresh_token, expires_at } }
+// Blob path: crm-tokens/tokens/{userId}.json
 
 const CORS = {
   "Content-Type": "application/json",
@@ -16,7 +17,8 @@ const HS_ID     = process.env.HUBSPOT_CLIENT_ID;
 const HS_SEC    = process.env.HUBSPOT_CLIENT_SECRET;
 
 function blobUrl(blobName) {
-  return `https://${ACCOUNT}.blob.core.windows.net/${CONTAINER}/${blobName}?${SAS_TOKEN}`;
+  const sas = SAS_TOKEN.startsWith("?") ? SAS_TOKEN : `?${SAS_TOKEN}`;
+  return `https://${ACCOUNT}.blob.core.windows.net/${CONTAINER}/${blobName}${sas}`;
 }
 
 async function readBlob(blobName) {
@@ -52,13 +54,17 @@ async function refreshHubSpotToken(userId, refreshToken) {
   });
   if (!res.ok) throw new Error("Failed to refresh HubSpot token");
   const data = await res.json();
-  const tokenData = {
-    access_token:  data.access_token,
-    refresh_token: data.refresh_token || refreshToken,
-    expires_at:    Date.now() + (data.expires_in || 1800) * 1000,
+
+  // Write back in Cipher's nested format
+  const updated = {
+    hubspot: {
+      access_token:  data.access_token,
+      refresh_token: data.refresh_token || refreshToken,
+      expires_at:    Date.now() + (data.expires_in || 1800) * 1000,
+    }
   };
-  await writeBlob(`hs-token--${userId}.json`, tokenData);
-  return tokenData;
+  await writeBlob(`tokens/${userId}.json`, updated);
+  return updated.hubspot;
 }
 
 export default async (req) => {
@@ -69,41 +75,25 @@ export default async (req) => {
     const dqUserId = new URL(req.url).searchParams.get("userId");
     if (!dqUserId) return new Response(JSON.stringify({ error: "userId required" }), { status: 400, headers: CORS });
 
-    // DQ uses a separate Clerk app so the user ID differs from Cipher's.
-    // CIPHER_USER_ID env var maps the DQ Clerk user to the correct Cipher blob key.
+    // Use CIPHER_USER_ID env var if DQ and Cipher have different Clerk apps
     const blobUserId = process.env.CIPHER_USER_ID || dqUserId;
+    console.log(`[dq-token] userId=${blobUserId} container=${CONTAINER}`);
 
-    // Tokens are stored in crm-tokens/tokens/{userId}.json
-    console.log(`[dq-token] looking up blob for userId: ${blobUserId}`);
-    console.log(`[dq-token] container: ${CONTAINER}`);
-    console.log(`[dq-token] account: ${ACCOUNT}`);
+    // Read blob — structure is { hubspot: { access_token, refresh_token, expires_at } }
+    const tokenData = await readBlob(`tokens/${blobUserId}.json`);
+    const hsToken   = tokenData.hubspot;
 
-    let tokenData;
-    try {
-      const blobPath = `tokens/${blobUserId}.json`;
-      console.log(`[dq-token] trying blob path: ${blobPath}`);
-      tokenData = await readBlob(blobPath);
-      console.log(`[dq-token] found token, expires_at: ${tokenData.expires_at}`);
-      console.log(`[dq-token] token keys: ${Object.keys(tokenData).join(', ')}`);
-      if (tokenData.hubspot) console.log(`[dq-token] hubspot keys: ${Object.keys(tokenData.hubspot).join(', ')}`);
-    } catch (e) {
-      console.log(`[dq-token] primary path failed: ${e.message}`);
-      try {
-        tokenData = await readBlob(`hs-token--${blobUserId}.json`);
-        console.log(`[dq-token] found via hs-token-- pattern`);
-      } catch {
-        tokenData = await readBlob(`tokens--${blobUserId}.json`);
-        console.log(`[dq-token] found via tokens-- pattern`);
-      }
-    }
+    if (!hsToken?.access_token) throw new Error("No HubSpot token in blob");
 
     // Refresh if expired (with 60s buffer)
-    if (!tokenData.access_token || Date.now() > (tokenData.expires_at - 60000)) {
-      const refreshed = await refreshHubSpotToken(blobUserId, tokenData.refresh_token);
+    if (Date.now() > (hsToken.expires_at - 60000)) {
+      console.log(`[dq-token] token expired, refreshing`);
+      const refreshed = await refreshHubSpotToken(blobUserId, hsToken.refresh_token);
       return new Response(JSON.stringify({ token: refreshed.access_token }), { status: 200, headers: CORS });
     }
 
-    return new Response(JSON.stringify({ token: tokenData.access_token }), { status: 200, headers: CORS });
+    console.log(`[dq-token] token valid, returning`);
+    return new Response(JSON.stringify({ token: hsToken.access_token }), { status: 200, headers: CORS });
 
   } catch (err) {
     console.error("[dq-token]", err.message);
