@@ -142,13 +142,20 @@ export default async (req) => {
     // Unique identifier: Record ID (updates existing, never creates new)
     if (type === "contact-updates") {
       const rows = [];
-      rows.push(["Record ID", "First Name", "Last Name", "Email", "Primary Outreach Rep", "Target Persona", "Primary Entity"]);
+      // NOTE: "Job Title (review only)" is a non-HubSpot column — HubSpot will ask
+      // you to map it during import. Choose "Don't import" for that column.
+      // All other columns auto-map by their exact property label names.
+      rows.push(["Record ID", "First Name", "Last Name", "Email", "Job Title (review only)", "Primary Outreach Rep", "Target Persona", "Primary Entity"]);
 
       // Build persona lookup from AI inference results
-      const personaMap = {};
+      const personaMap  = {};
+      const jobTitleMap = {};
       for (const r of personaResults) {
         if (r.contactId && r.persona && !r.isNonICP) {
           personaMap[r.contactId] = validEnum(r.persona, VALID_PERSONAS) || "";
+        }
+        if (r.contactId && r.jobtitle) {
+          jobTitleMap[r.contactId] = r.jobtitle;
         }
       }
 
@@ -163,10 +170,15 @@ export default async (req) => {
             firstName: nameParts[0] || "",
             lastName:  nameParts.slice(1).join(" ") || "",
             email:     issue.contactEmail || "",
+            jobTitle:  issue.contactTitle || jobTitleMap[id] || "",
             rep:       "",
             persona:   personaMap[id] || "",
             entity:    "",
           };
+        }
+        // Update job title if we have it from the issue
+        if (issue.contactTitle && !contactUpdates[id].jobTitle) {
+          contactUpdates[id].jobTitle = issue.contactTitle;
         }
         if (issue.field === "primary_outreach_rep" && issue.proposedValue) {
           contactUpdates[id].rep = validEnum(issue.proposedValue, VALID_PRIMARY_REPS) || "";
@@ -188,23 +200,27 @@ export default async (req) => {
             firstName: nameParts[0] || "",
             lastName:  nameParts.slice(1).join(" ") || "",
             email:     "",
+            jobTitle:  r.jobtitle || "",
             rep:       "",
             persona,
             entity:    "",
           };
         } else {
           contactUpdates[r.contactId].persona = persona;
+          if (r.jobtitle && !contactUpdates[r.contactId].jobTitle) {
+            contactUpdates[r.contactId].jobTitle = r.jobtitle;
+          }
         }
       }
 
       // Write rows — only include contacts with at least one update
       for (const c of Object.values(contactUpdates)) {
         if (!c.rep && !c.persona && !c.entity) continue;
-        rows.push([c.id, c.firstName, c.lastName, c.email, c.rep, c.persona, c.entity]);
+        rows.push([c.id, c.firstName, c.lastName, c.email, c.jobTitle, c.rep, c.persona, c.entity]);
       }
 
       if (rows.length === 1) {
-        rows.push(["", "", "", "", "Run Persona AI inference first to populate Target Persona values", "", ""]);
+        rows.push(["", "", "", "", "", "Run Persona AI inference first to populate Target Persona values", "", ""]);
       }
 
       return csvResponse(csvFile(rows), `UPLOAD-TO-HUBSPOT-contacts-${date}.csv`);
