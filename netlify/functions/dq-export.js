@@ -53,7 +53,7 @@ export default async (req) => {
   if (req.method !== "POST")   return new Response("Method not allowed", { status: 405, headers: CORS });
 
   try {
-    const { type, scanResult } = await req.json();
+    const { type, scanResult, personaResults = [] } = await req.json();
     const date = new Date().toISOString().slice(0, 10);
 
     // ── COMPANY FIELD UPDATES ─────────────────────────────────────────────────
@@ -142,45 +142,69 @@ export default async (req) => {
     // Unique identifier: Record ID (updates existing, never creates new)
     if (type === "contact-updates") {
       const rows = [];
-      // Header row — these labels auto-map in HubSpot import
       rows.push(["Record ID", "First Name", "Last Name", "Email", "Primary Outreach Rep", "Target Persona", "Primary Entity"]);
 
-      for (const issue of (scanResult.phase3?.issues || []).filter(i => i.csvExportable && i.proposedValue)) {
-        let rep     = "";
-        let persona = "";
-        let entity  = "";
-
-        if (issue.field === "primary_outreach_rep") {
-          rep = validEnum(issue.proposedValue, VALID_PRIMARY_REPS) || "";
+      // Build persona lookup from AI inference results
+      const personaMap = {};
+      for (const r of personaResults) {
+        if (r.contactId && r.persona && !r.isNonICP) {
+          personaMap[r.contactId] = validEnum(r.persona, VALID_PERSONAS) || "";
         }
-        if (issue.field === "target_persona") {
-          persona = validEnum(issue.proposedValue, VALID_PERSONAS) || "";
+      }
+
+      // Build a unified map of all contact updates keyed by contact ID
+      const contactUpdates = {};
+      for (const issue of (scanResult.phase3?.issues || []).filter(i => i.csvExportable)) {
+        const id = issue.contactId;
+        if (!contactUpdates[id]) {
+          const nameParts = (issue.contactName || "").trim().split(/\s+/);
+          contactUpdates[id] = {
+            id,
+            firstName: nameParts[0] || "",
+            lastName:  nameParts.slice(1).join(" ") || "",
+            email:     issue.contactEmail || "",
+            rep:       "",
+            persona:   personaMap[id] || "",
+            entity:    "",
+          };
         }
-        if (issue.field === "primary_entity") {
-          entity = issue.proposedValue || "";
+        if (issue.field === "primary_outreach_rep" && issue.proposedValue) {
+          contactUpdates[id].rep = validEnum(issue.proposedValue, VALID_PRIMARY_REPS) || "";
         }
+        if (issue.field === "primary_entity" && issue.proposedValue) {
+          contactUpdates[id].entity = issue.proposedValue;
+        }
+      }
 
-        // Only write rows where at least one field has a valid proposed value
-        if (!rep && !persona && !entity) continue;
+      // Also add contacts that only have a persona inference (no other issues)
+      for (const r of personaResults) {
+        if (r.isNonICP || !r.persona) continue;
+        const persona = validEnum(r.persona, VALID_PERSONAS) || "";
+        if (!persona) continue;
+        if (!contactUpdates[r.contactId]) {
+          const nameParts = (r.contactName || "").trim().split(/\s+/);
+          contactUpdates[r.contactId] = {
+            id: r.contactId,
+            firstName: nameParts[0] || "",
+            lastName:  nameParts.slice(1).join(" ") || "",
+            email:     "",
+            rep:       "",
+            persona,
+            entity:    "",
+          };
+        } else {
+          contactUpdates[r.contactId].persona = persona;
+        }
+      }
 
-        // Split name back into first/last for the import
-        const nameParts = (issue.contactName || "").trim().split(/\s+/);
-        const firstName = nameParts[0] || "";
-        const lastName  = nameParts.slice(1).join(" ") || "";
-
-        rows.push([
-          issue.contactId,
-          firstName,
-          lastName,
-          issue.contactEmail || "",
-          rep,
-          persona,
-          entity,
-        ]);
+      // Write rows — only include contacts with at least one update
+      for (const c of Object.values(contactUpdates)) {
+        if (!c.rep && !c.persona && !c.entity) continue;
+        rows.push([c.id, c.firstName, c.lastName, c.email, c.rep, c.persona, c.entity]);
       }
 
       if (rows.length === 1) {
-        rows.push(["", "", "", "", "No contact updates with valid proposed values", "", ""]);
+        rows.push(["", "", "", "", "Run Persona AI inference first to populate Target Persona values", "", ""]);
       }
 
       return csvResponse(csvFile(rows), `UPLOAD-TO-HUBSPOT-contacts-${date}.csv`);
