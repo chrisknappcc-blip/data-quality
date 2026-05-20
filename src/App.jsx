@@ -613,6 +613,215 @@ function Step3({ data }) {
   )
 }
 
+// ─── Persona Inference Panel ──────────────────────────────────────────────────
+function PersonaPanel({ scanResult, onPersonaResults }) {
+  const [running, setRunning]         = useState(false)
+  const [results, setResults]         = useState([])
+  const [progress, setProgress]       = useState('')
+  const [done, setDone]               = useState(false)
+  const [error, setError]             = useState(null)
+  const [cachedAt, setCachedAt]       = useState(null)
+  const [filter, setFilter]           = useState('all')
+  const [search, setSearch]           = useState('')
+
+  // Build contact list from Phase 3 missing-persona issues
+  const contacts = (scanResult?.phase3?.issues || [])
+    .filter(i => i.type === 'MISSING_PERSONA')
+    .map(i => ({
+      id: i.contactId,
+      name: i.contactName,
+      jobtitle: i.contactTitle || '',
+      companyName: i.companyName,
+      company_type: '', // enriched by scan
+    }))
+
+  const runInference = async (forceRefresh = false) => {
+    if (!contacts.length) return
+    setRunning(true); setResults([]); setDone(false); setError(null); setCachedAt(null)
+    const allResults = []; const batchSize = 50; let batchStart = 0
+
+    try {
+      while (batchStart < contacts.length) {
+        setProgress(`Processing contacts ${batchStart+1}–${Math.min(batchStart+batchSize, contacts.length)} of ${contacts.length}…`)
+        const res = await fetch('/api/dq-persona', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contacts, batchStart, batchSize, forceRefresh }),
+        })
+        if (!res.ok) throw new Error('Persona inference request failed')
+        const d = await res.json()
+        allResults.push(...(d.results || []))
+        if (!d.hasMore) break
+        batchStart = d.nextBatch
+        await new Promise(r => setTimeout(r, 500))
+      }
+
+      setResults(allResults)
+      setDone(true)
+      setProgress('')
+      onPersonaResults(allResults)
+    } catch(e) { setError(e.message); setProgress('') }
+    finally { setRunning(false) }
+  }
+
+  const icp    = results.filter(r => r.persona && !r.isNonICP)
+  const nonICP = results.filter(r => r.isNonICP)
+  const unclear = results.filter(r => !r.persona && !r.isNonICP && r.confidence !== 'error')
+
+  const FILTERS = [
+    { key:'all',    label:`All (${results.length})` },
+    { key:'icp',    label:`Has Persona (${icp.length})` },
+    { key:'nonICP', label:`Non-ICP (${nonICP.length})` },
+    { key:'unclear',label:`Unclear (${unclear.length})` },
+  ]
+
+  const filtered = results.filter(r => {
+    if (filter === 'icp'    && (!r.persona || r.isNonICP)) return false
+    if (filter === 'nonICP' && !r.isNonICP) return false
+    if (filter === 'unclear' && (r.persona || r.isNonICP)) return false
+    if (search && !r.contactName?.toLowerCase().includes(search.toLowerCase()) &&
+        !r.jobtitle?.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
+  return (
+    <Card>
+      <CardHead right={
+        done
+          ? <Pill color={C.green}>{icp.length} personas assigned · {nonICP.length} non-ICP flagged</Pill>
+          : contacts.length > 0
+            ? <Pill color={C.amber}>{contacts.length} contacts need personas</Pill>
+            : <Pill color={C.green}>All contacts have personas</Pill>
+      }>AI Persona Inference</CardHead>
+
+      <div style={{ padding:16, display:'flex', flexDirection:'column', gap:14 }}>
+
+        {contacts.length === 0 ? (
+          <Callout type="success">✓ All contacts already have a target persona assigned.</Callout>
+        ) : (
+          <>
+            <div style={{ padding:14, background:C.panel, border:`1px solid ${C.borderHi}`,
+              borderRadius:10, display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:14 }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:13, fontWeight:600, marginBottom:5 }}>
+                  Infer Target Persona from Job Title
+                </div>
+                <div style={{ fontSize:12, color:C.sub, lineHeight:1.6 }}>
+                  Uses rule-based matching first (free, instant), then Claude Haiku for
+                  ambiguous titles. Contacts clearly outside your ICP (vendor reps, clinicians,
+                  HR, marketing) are flagged as Non-ICP and excluded from the Contact Updates import.
+                </div>
+                <div style={{ fontSize:11, color:C.muted, marginTop:5, display:'flex', gap:16 }}>
+                  <span>{contacts.length} contacts to process</span>
+                  <span>~${(contacts.length * 0.00025).toFixed(2)} estimated cost</span>
+                  <span>~{Math.ceil(contacts.length / 50 * 3)} seconds</span>
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+                {done && <Btn variant="ghost" small disabled={running} onClick={() => runInference(true)}>Force refresh</Btn>}
+                <Btn variant="primary" disabled={running} onClick={() => runInference(false)}>
+                  {running ? '⟳ Running…' : done ? 'Re-run' : 'Run Inference'}
+                </Btn>
+              </div>
+            </div>
+
+            {running && <div style={{ fontSize:12, color:C.accent }}>{progress}</div>}
+            {error   && <Callout type="error">{error}</Callout>}
+
+            {done && results.length > 0 && (
+              <>
+                <SummaryGrid items={[
+                  { label:'Persona Assigned', value:icp.length,    color:C.green },
+                  { label:'Non-ICP (excluded)', value:nonICP.length, color:C.amber },
+                  { label:'Unclear',           value:unclear.length, color:C.sub },
+                  { label:'From Cache',        value:results.filter(r=>r.fromCache).length, color:C.muted },
+                  { label:'Rule-Based',        value:results.filter(r=>r.method==='rule').length, color:C.accent },
+                  { label:'Claude Inferred',   value:results.filter(r=>r.method==='claude').length, color:C.purple },
+                ]} />
+
+                <Callout type="info">
+                  Personas are included in the Contact Updates export automatically.
+                  Non-ICP contacts are excluded from the import file.
+                  Review the Unclear list and assign manually where needed.
+                </Callout>
+
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                  {FILTERS.map(f => (
+                    <button key={f.key} onClick={() => setFilter(f.key)}
+                      style={{ fontSize:11, padding:'4px 11px', borderRadius:20, cursor:'pointer',
+                        border:`1px solid ${filter===f.key?C.accent:C.border}`,
+                        background:filter===f.key?`${C.accent}18`:'transparent',
+                        color:filter===f.key?C.accent:C.sub }}>
+                      {f.label}
+                    </button>
+                  ))}
+                  <input value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="Search by name or title…"
+                    style={{ flex:1, minWidth:160, padding:'5px 10px', background:C.card,
+                      border:`1px solid ${C.border}`, borderRadius:6, fontSize:11,
+                      color:C.text, outline:'none' }} />
+                </div>
+
+                <div style={{ border:`1px solid ${C.border}`, borderRadius:8, overflow:'hidden' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                    <thead>
+                      <tr style={{ background:C.panel }}>
+                        {['Contact','Job Title','Company','Inferred Persona','Confidence','Method'].map(h => (
+                          <th key={h} style={{ padding:'8px 12px', fontSize:9, fontWeight:700,
+                            textTransform:'uppercase', letterSpacing:'.06em', color:C.muted,
+                            borderBottom:`1px solid ${C.border}`, textAlign:'left' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.slice(0,150).map((r,i) => (
+                        <tr key={i} style={{ borderBottom:`1px solid ${C.border}` }}
+                          onMouseEnter={e => e.currentTarget.style.background=C.card}
+                          onMouseLeave={e => e.currentTarget.style.background=''}>
+                          <td style={{ padding:'7px 12px', fontWeight:500 }}>{r.contactName||'—'}</td>
+                          <td style={{ padding:'7px 12px', color:C.sub, maxWidth:200,
+                            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
+                            title={r.jobtitle}>{r.jobtitle||'—'}</td>
+                          <td style={{ padding:'7px 12px', color:C.sub }}>{r.companyName||'—'}</td>
+                          <td style={{ padding:'7px 12px' }}>
+                            {r.isNonICP
+                              ? <span style={{ color:C.amber, fontSize:10, fontWeight:600 }}>NON-ICP</span>
+                              : r.persona
+                                ? <span style={{ color:C.green }}>{r.persona}</span>
+                                : <span style={{ color:C.muted, fontStyle:'italic' }}>unclear</span>
+                            }
+                          </td>
+                          <td style={{ padding:'7px 12px' }}>
+                            <span style={{ fontSize:10, color:
+                              r.confidence==='high'?C.green:r.confidence==='medium'?C.amber:C.muted }}>
+                              {r.confidence}
+                            </span>
+                          </td>
+                          <td style={{ padding:'7px 12px' }}>
+                            <span style={{ fontSize:10, color:C.muted }}>
+                              {r.method==='rule'?'Rule':'rule'===r.method?'Rule':r.method==='claude'?'AI':'cache'===r.method?'Cache':r.method}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {filtered.length > 150 && (
+                    <div style={{ padding:'9px 12px', fontSize:11, color:C.muted,
+                      textAlign:'center', background:C.panel, borderTop:`1px solid ${C.border}` }}>
+                      Showing 150 of {filtered.length.toLocaleString()} — download Contact Updates CSV for full list
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 // ─── Step 4: Stale ────────────────────────────────────────────────────────────
 function Step4({ data }) {
   if (!data) return null
@@ -890,7 +1099,7 @@ function CorrectionsPanel() {
 }
 
 // ─── Export Panel ─────────────────────────────────────────────────────────────
-function ExportPanel({ scanResult }) {
+function ExportPanel({ scanResult, personaResults = [] }) {
   const [exporting, setExporting] = useState({})
   const [downloadingAll, setDownloadingAll] = useState(false)
 
@@ -899,7 +1108,7 @@ function ExportPanel({ scanResult }) {
     try {
       const res = await fetch('/api/dq-export', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ type, scanResult }),
+        body: JSON.stringify({ type, scanResult, personaResults }),
       })
       if (!res.ok) throw new Error('Export failed')
       const blob = await res.blob()
@@ -1001,6 +1210,7 @@ export default function App() {
   const [activeStep, setActiveStep]     = useState('overview')
   const [progress, setProgress]         = useState('')
   const [scope, setScope]               = useState('gold')
+  const [personaResults, setPersonaResults] = useState([])
 
   const runScan = useCallback(async () => {
     setScanning(true); setError(null); setScanResult(null); setApproved({})
@@ -1041,6 +1251,7 @@ export default function App() {
     { key:'2',  label:'Hierarchy',   count:p2?.total },
     { key:'3',  label:'Contacts',    count:p3?.total },
     { key:'4',  label:'Stale',       count:(p4?.neverContacted||0)+(p4?.stale1Year||0) },
+    { key:'persona',     label:'Persona AI' },
     { key:'export',      label:'Export' },
     { key:'corrections', label:'Corrections' },
   ]
@@ -1187,7 +1398,8 @@ export default function App() {
                   <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />
                   <Step3 data={scanResult.phase3} />
                   <Step4 data={scanResult.phase4} />
-                  <ExportPanel scanResult={scanResult} />
+                  <PersonaPanel scanResult={scanResult} onPersonaResults={setPersonaResults} />
+                  <ExportPanel scanResult={scanResult} personaResults={personaResults} />
                 </div>
               )}
               {activeStep === '0' && <Step0 data={scanResult.phase0} />}
@@ -1195,7 +1407,8 @@ export default function App() {
               {activeStep === '2' && <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />}
               {activeStep === '3' && <Step3 data={scanResult.phase3} />}
               {activeStep === '4' && <Step4 data={scanResult.phase4} />}
-              {activeStep === 'export'      && <ExportPanel scanResult={scanResult} />}
+              {activeStep === 'persona' && <PersonaPanel scanResult={scanResult} onPersonaResults={setPersonaResults} />}
+              {activeStep === 'export'      && <ExportPanel scanResult={scanResult} personaResults={personaResults} />}
               {activeStep === 'corrections' && <CorrectionsPanel />}
             </>
           )}
