@@ -237,17 +237,14 @@ function Step1({ data, approved, onApprove }) {
 }
 
 // ─── Step 2: Hierarchy ────────────────────────────────────────────────────────
-function Step2({ data, approved, onApprove, companies }) {
-  const [enriching, setEnriching]         = useState(false)
-  const [enrichResults, setEnrichResults] = useState([])
+function Step2({ data, approved, onApprove, companies, enrichResults, setEnrichResults, enrichDone, setEnrichDone }) {
+  const [enriching, setEnriching]           = useState(false)
   const [enrichProgress, setEnrichProgress] = useState('')
-  const [enrichDone, setEnrichDone]       = useState(false)
-  const [enrichError, setEnrichError]     = useState(null)
+  const [enrichError, setEnrichError]       = useState(null)
+  const [enrichCachedAt, setEnrichCachedAt] = useState(null)
 
   if (!data) return null
   const { proposals, summary } = data
-
-  const [enrichCachedAt, setEnrichCachedAt] = useState(null)
 
   const runEnrichment = async (forceRefresh = false) => {
     setEnriching(true); setEnrichResults([]); setEnrichDone(false)
@@ -354,6 +351,20 @@ function Step2({ data, approved, onApprove, companies }) {
 
           {enrichDone && enrichResults.length > 0 && (
             <div style={{ marginTop:14, display:'flex', flexDirection:'column', gap:12 }}>
+
+              {/* What's being sent to export */}
+              <div style={{ padding:'10px 14px', background:`${C.green}0f`,
+                border:`1px solid ${C.green}33`, borderRadius:8 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:C.green, marginBottom:4 }}>
+                  ✓ Research complete — feeding into Company Updates export
+                </div>
+                <div style={{ fontSize:11, color:C.sub }}>
+                  {withUpdates.length} companies will have company_type and/or parent_system_name updated.
+                  {nameChanges.length > 0 && ` ${nameChanges.length} company name${nameChanges.length>1?'s':''} need manual update in HubSpot (not importable via CSV).`}
+                  {' '}No re-scan needed — go to Export when ready.
+                </div>
+              </div>
+
               <SummaryGrid items={[
                 { label:'Researched',      value:enrichResults.length },
                 { label:'Name Changes',    value:nameChanges.length,   color:nameChanges.length>0?C.red:C.green },
@@ -614,15 +625,17 @@ function Step3({ data }) {
 }
 
 // ─── Persona Inference Panel ──────────────────────────────────────────────────
-function PersonaPanel({ scanResult, onPersonaResults }) {
+function PersonaPanel({ scanResult, onPersonaResults, personaDone, setPersonaDone }) {
   const [running, setRunning]         = useState(false)
   const [results, setResults]         = useState([])
   const [progress, setProgress]       = useState('')
-  const [done, setDone]               = useState(false)
   const [error, setError]             = useState(null)
   const [cachedAt, setCachedAt]       = useState(null)
   const [filter, setFilter]           = useState('all')
   const [search, setSearch]           = useState('')
+  // Use lifted done state, alias for internal use
+  const done = personaDone
+  const setDone = setPersonaDone
 
   // Build contact list from Phase 3 missing-persona issues
   // Build company_type lookup from scan results — use String keys for consistency
@@ -647,11 +660,11 @@ function PersonaPanel({ scanResult, onPersonaResults }) {
   const runInference = async (forceRefresh = false) => {
     if (!contacts.length) return
     setRunning(true); setResults([]); setDone(false); setError(null); setCachedAt(null)
-    const allResults = []; const batchSize = 50; let batchStart = 0
+    const allResults = []; const batchSize = 10; let batchStart = 0
 
     try {
       while (batchStart < contacts.length) {
-        setProgress(`Processing contacts ${batchStart+1}–${Math.min(batchStart+batchSize, contacts.length)} of ${contacts.length}…`)
+        const batchNum = Math.floor(batchStart/batchSize)+1; const totalBatches = Math.ceil(contacts.length/batchSize); setProgress(`Batch ${batchNum} of ${totalBatches} — contacts ${batchStart+1}–${Math.min(batchStart+batchSize, contacts.length)} of ${contacts.length}…`)
         const res = await fetch('/api/dq-persona', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -748,11 +761,18 @@ function PersonaPanel({ scanResult, onPersonaResults }) {
                   { label:'Low/Review',      value:results.filter(r=>r.confidence==='low').length,    color:C.red },
                 ]} />
 
-                <Callout type="info">
-                  Personas are included in the Contact Updates export automatically.
-                  Non-ICP contacts are excluded from the import file.
-                  Review the Unclear list and assign manually where needed.
-                </Callout>
+                <div style={{ padding:'10px 14px', background:`${C.green}0f`,
+                  border:`1px solid ${C.green}33`, borderRadius:8 }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:C.green, marginBottom:4 }}>
+                    ✓ Inference complete — feeding into Contact Updates export
+                  </div>
+                  <div style={{ fontSize:11, color:C.sub }}>
+                    {icp.length.toLocaleString()} contacts will have target_persona set.
+                    {nonICP.length > 0 && ` ${nonICP.length} non-ICP contacts excluded from import.`}
+                    {unclear.length > 0 && ` ${unclear.length} unclear — review below and assign manually if needed.`}
+                    {' '}No re-scan needed — go to Export when ready.
+                  </div>
+                </div>
 
                 <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
                   {FILTERS.map(f => (
@@ -1108,7 +1128,7 @@ function CorrectionsPanel() {
 }
 
 // ─── Export Panel ─────────────────────────────────────────────────────────────
-function ExportPanel({ scanResult, personaResults = [] }) {
+function ExportPanel({ scanResult, personaResults = [], enrichDone = false, personaDone = false }) {
   const [exporting, setExporting] = useState({})
   const [downloadingAll, setDownloadingAll] = useState(false)
 
@@ -1182,9 +1202,65 @@ function ExportPanel({ scanResult, personaResults = [] }) {
         </Btn>
       }>Downloads & Exports</CardHead>
       <div style={{ padding:16, display:'flex', flexDirection:'column', gap:8 }}>
+
+        {/* Export readiness status */}
+        <div style={{ padding:'12px 14px', background:C.panel, border:`1px solid ${C.border}`,
+          borderRadius:9, display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ fontSize:11, fontWeight:600, color:C.sub, textTransform:'uppercase', letterSpacing:'.06em' }}>
+            What's included in your export files
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+            {/* Company Updates */}
+            <div style={{ padding:'10px 12px', background:C.card, borderRadius:8,
+              border:`1px solid ${C.border}` }}>
+              <div style={{ fontSize:12, fontWeight:600, marginBottom:6 }}>
+                🏢 Company Updates
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <div style={{ fontSize:11, color:C.green }}>
+                  ✓ company_type proposals (static knowledge)
+                </div>
+                <div style={{ fontSize:11, color:C.green }}>
+                  ✓ parent_system_name proposals
+                </div>
+                {enrichDone
+                  ? <div style={{ fontSize:11, color:C.green }}>✓ Live Research verified — name changes flagged</div>
+                  : <div style={{ fontSize:11, color:C.amber }}>⚠ Live Research not run — proposals unverified</div>
+                }
+              </div>
+            </div>
+            {/* Contact Updates */}
+            <div style={{ padding:'10px 12px', background:C.card, borderRadius:8,
+              border:`1px solid ${C.border}` }}>
+              <div style={{ fontSize:12, fontWeight:600, marginBottom:6 }}>
+                👤 Contact Updates
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <div style={{ fontSize:11, color:C.green }}>
+                  ✓ primary_outreach_rep backfill ({(scanResult?.phase3?.summary?.withProposedValue||0).toLocaleString()} contacts)
+                </div>
+                {personaDone
+                  ? <div style={{ fontSize:11, color:C.green }}>
+                      ✓ target_persona assigned ({personaResults.filter(r=>r.persona&&!r.isNonICP).length.toLocaleString()} contacts)
+                    </div>
+                  : <div style={{ fontSize:11, color:C.amber }}>
+                      ⚠ Persona AI not run — target_persona column will be empty
+                    </div>
+                }
+              </div>
+            </div>
+          </div>
+          {(!enrichDone || !personaDone) && (
+            <div style={{ fontSize:11, color:C.amber, borderTop:`1px solid ${C.border}`, paddingTop:8 }}>
+              You can still download and import now — missing steps can be run and re-exported later.
+              No need to re-scan.
+            </div>
+          )}
+        </div>
+
         <Callout type="info">
           The two import files (Company Updates, Contact Updates) go directly into HubSpot with no manual adjustments.
-          Column headers are set to exact HubSpot property labels so auto-mapping works on import.
+          Column headers match exact HubSpot property labels so auto-mapping works on import.
           Everything else is for review or manual action.
         </Callout>
         {EXPORTS.map(exp => (
@@ -1220,9 +1296,18 @@ export default function App() {
   const [progress, setProgress]         = useState('')
   const [scope, setScope]               = useState('gold')
   const [personaResults, setPersonaResults] = useState([])
+  const [personaDone, setPersonaDone]   = useState(false)
+  const [enrichResults, setEnrichResults] = useState([])
+  const [enrichDone, setEnrichDone]     = useState(false)
+
+  // Reset enrichment state when scan reruns
+  const resetEnrichment = () => {
+    setPersonaResults([]); setPersonaDone(false)
+    setEnrichResults([]); setEnrichDone(false)
+  }
 
   const runScan = useCallback(async () => {
-    setScanning(true); setError(null); setScanResult(null); setApproved({})
+    setScanning(true); setError(null); setScanResult(null); setApproved({}); resetEnrichment()
     try {
       setProgress('Connecting to HubSpot…')
       const tRes = await fetch(`/api/dq-token?userId=${userId}`)
@@ -1296,6 +1381,47 @@ export default function App() {
             {scanning ? progress||'Scanning…' : scanResult ? '↻ Re-scan' : 'Run Scan'}
           </Btn>
         </div>
+
+        {/* Workflow status bar — shows when scan is done */}
+        {scanResult && (
+          <div style={{ background:C.card, borderBottom:`1px solid ${C.border}`,
+            padding:'6px 24px', display:'flex', alignItems:'center', gap:16, flexWrap:'wrap' }}>
+            <span style={{ fontSize:10, fontWeight:600, textTransform:'uppercase',
+              letterSpacing:'.06em', color:C.muted }}>Workflow</span>
+            {[
+              { label:'Scan', done:true, required:true },
+              { label:'Live Research', done:enrichDone, required:false,
+                action:'Run in Step 3 → Hierarchy', tab:'2' },
+              { label:'Persona AI', done:personaDone, required:false,
+                action:'Run in Persona AI tab', tab:'persona' },
+              { label:'Ready to Export', done:enrichDone || personaDone, required:false },
+            ].map((step,i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:5 }}>
+                <span style={{ fontSize:16, lineHeight:1 }}>
+                  {step.done ? '✓' : '○'}
+                </span>
+                <span style={{ fontSize:11, color:step.done?C.green:C.muted, fontWeight:step.done?600:400 }}>
+                  {step.label}
+                </span>
+                {!step.done && step.action && (
+                  <button onClick={() => setActiveStep(step.tab)}
+                    style={{ fontSize:10, color:C.accent, background:'none', border:'none',
+                      cursor:'pointer', padding:0, textDecoration:'underline' }}>
+                    {step.action}
+                  </button>
+                )}
+                {i < 3 && <span style={{ color:C.muted, marginLeft:4 }}>→</span>}
+              </div>
+            ))}
+            {(enrichDone || personaDone) && (
+              <button onClick={() => setActiveStep('export')}
+                style={{ marginLeft:'auto', fontSize:11, color:'#fff', background:C.accent,
+                  border:'none', borderRadius:6, padding:'4px 12px', cursor:'pointer', fontWeight:600 }}>
+                Go to Export →
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Step nav — show corrections tab always */}
         <div style={{ background:C.panel, borderBottom:`1px solid ${C.border}`,
@@ -1404,20 +1530,20 @@ export default function App() {
                   </div>
                   <Step0 data={scanResult.phase0} />
                   <Step1 data={scanResult.phase1} approved={approved} onApprove={handleApprove} />
-                  <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />
+                  <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} enrichResults={enrichResults} setEnrichResults={setEnrichResults} enrichDone={enrichDone} setEnrichDone={setEnrichDone} />
                   <Step3 data={scanResult.phase3} />
                   <Step4 data={scanResult.phase4} />
-                  <PersonaPanel scanResult={scanResult} onPersonaResults={setPersonaResults} />
-                  <ExportPanel scanResult={scanResult} personaResults={personaResults} />
+                  <PersonaPanel scanResult={scanResult} onPersonaResults={setPersonaResults} personaDone={personaDone} setPersonaDone={setPersonaDone} />
+                  <ExportPanel scanResult={scanResult} personaResults={personaResults} enrichDone={enrichDone} personaDone={personaDone} />
                 </div>
               )}
               {activeStep === '0' && <Step0 data={scanResult.phase0} />}
               {activeStep === '1' && <Step1 data={scanResult.phase1} approved={approved} onApprove={handleApprove} />}
-              {activeStep === '2' && <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} />}
+              {activeStep === '2' && <Step2 data={scanResult.phase2} approved={approved} onApprove={handleApprove} companies={scanResult.companies||[]} enrichResults={enrichResults} setEnrichResults={setEnrichResults} enrichDone={enrichDone} setEnrichDone={setEnrichDone} />}
               {activeStep === '3' && <Step3 data={scanResult.phase3} />}
               {activeStep === '4' && <Step4 data={scanResult.phase4} />}
-              {activeStep === 'persona' && <PersonaPanel scanResult={scanResult} onPersonaResults={setPersonaResults} />}
-              {activeStep === 'export'      && <ExportPanel scanResult={scanResult} personaResults={personaResults} />}
+              {activeStep === 'persona' && <PersonaPanel scanResult={scanResult} onPersonaResults={setPersonaResults} personaDone={personaDone} setPersonaDone={setPersonaDone} />}
+              {activeStep === 'export'      && <ExportPanel scanResult={scanResult} personaResults={personaResults} enrichDone={enrichDone} personaDone={personaDone} />}
               {activeStep === 'corrections' && <CorrectionsPanel />}
             </>
           )}
