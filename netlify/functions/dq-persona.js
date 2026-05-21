@@ -29,7 +29,7 @@ const CACHE_BLOB = "dq-persona-cache.json";
 const PERSONA_MAP = [
 
   { value: "Nursing Officer", hints: [
-    "nursing officer", "chief nurse", "chief nursing",
+    "nursing officer", "chief nurse", "chief nursing", "nursing services", "vp of nursing services",
     "cno", "vp nursing", "vp of nursing", "vice president nursing", "vice president of nursing",
     "svp nursing", "svp chief nursing", "senior vice president nursing", "senior vp nursing",
     "assistant chief nursing", "associate chief nursing", "deputy chief nursing",
@@ -65,6 +65,7 @@ const PERSONA_MAP = [
 
   { value: "Finance", hints: [
     "chief financial", "revenue cycle", "finance director", "finance officer",
+    "financial operations", "financial planning", "financial services director",
     "cfo", "vp finance", "vp of finance", "vice president finance", "vice president of finance",
     "svp finance", "director of finance", "director finance",
     "director accounts payable", "director of accounts payable", "director collections",
@@ -85,7 +86,7 @@ const PERSONA_MAP = [
   ]},
 
   { value: "Strategy", hints: [
-    "chief strategy", "strategic planning", "business transformation",
+    "chief strategy", "strategic planning", "corporate strategy", "enterprise strategy", "business transformation",
     "cso", "chief growth and strategy", "vp strategy", "vp of strategy", "vp, strategy",
     "vice president strategy", "vice president, strategy", "vice president of strategy",
     "svp strategy", "senior vp strategy", "director of strategy", "director strategy",
@@ -101,7 +102,7 @@ const PERSONA_MAP = [
   { value: "Innovation", hints: [
     "chief digital", "chief data officer", "chief information officer",
     "chief technology", "chief healthcare technology", "digital transformation", "data science",
-    "health informatics", "clinical informatics",
+    "health informatics", "clinical informatics", "information systems",
     "cdio", "ciso", "chief information security", "information security officer",
     "vp digital", "vp of digital", "vice president digital",
     "svp digital", "senior vp digital", "senior vice president digital",
@@ -112,7 +113,7 @@ const PERSONA_MAP = [
     "director it ", "director of it", "it director",
     "senior director information technology",
     "director data", "director of data", "data director",
-    "director analytics", "director of analytics", "analytics director",
+    "director analytics", "director of analytics", "analytics director", "data & analytics", "data and analytics",
     "director data analytics", "director of data analytics",
     "director data science", "director of data science",
     "senior director data", "senior director analytics",
@@ -156,7 +157,7 @@ const PERSONA_MAP = [
   ]},
 
   { value: "Case Management", hints: [
-    "case management", "care coordination", "post acute", "post-acute",
+    "case management", "complex care management", "care coordination", "care transitions", "complex care", "post acute", "post-acute",
     "transitions of care", "discharge planning", "utilization management",
     "utilization review",
     "director case management", "director of case management",
@@ -171,7 +172,7 @@ const PERSONA_MAP = [
   ]},
 
   { value: "Access/Patient Access", hints: [
-    "patient access", "patient registration", "patient scheduling", "patient admissions",
+    "patient access", "patient services", "patient registration", "patient scheduling", "patient admissions",
     "director patient access", "director of patient access",
     "vp patient access", "vice president patient access",
     "regional director patient access",
@@ -183,7 +184,7 @@ const PERSONA_MAP = [
 
   { value: "Patient Experience", hints: [
     "patient experience", "patient satisfaction", "patient engagement",
-    "consumer experience", "patient relations",
+    "consumer experience", "consumer experience", "patient relations",
     "vp patient experience", "vice president patient experience",
     "head of customer experience", "director customer experience",
     "director patient relations",
@@ -192,7 +193,7 @@ const PERSONA_MAP = [
   { value: "Business Development", hints: [
     "business development",
     "chief growth officer",
-    "network development", "referral development",
+    "network development", "network services", "provider relations", "referral development",
     "strategic partnerships",
     "director strategic partnerships", "vp strategic partnerships",
     "vice president strategic partnerships",
@@ -226,7 +227,7 @@ const PERSONA_MAP = [
   ]},
 
   { value: "Service Line", hints: [
-    "service line",
+    "service line", "cardiovascular services", "oncology services", "cancer services",
     "cardiovascular service", "heart and vascular", "cardiology service",
     "oncology service", "cancer service",
     "cardiovascular director", "director cardiovascular",
@@ -242,7 +243,8 @@ const PERSONA_MAP = [
   ]},
 
   { value: "Clinical Operations", hints: [
-    "clinical operations", "director of nursing", "director nursing",
+    "clinical operations", "clinic operations", "clinical ops", "clinic ops",
+    "director of nursing", "director nursing",
     "vp clinical", "vice president clinical",
     "nursing director",
     "director clinical excellence",
