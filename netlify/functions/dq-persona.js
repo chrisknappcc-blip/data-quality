@@ -446,43 +446,89 @@ function classifyContact(title, companyType) {
 }
 
 // ─── Claude batch inference ───────────────────────────────────────────────────
-async function inferPersonasBatch(contacts) {
+// ─── Sonnet inference — the backbone ─────────────────────────────────────────
+// Claude Sonnet does the actual reasoning. Every contact that isn't a dead-certain
+// rule match comes here. Sonnet gets:
+//   - Job title
+//   - Full company name + company type
+//   - Email domain (reveals which subsidiary they're actually at)
+//   - Peer context: what other contacts at same company are already tagged as
+//   - CarePathIQ product context so it understands what "target" means
+//
+// Batch size: 10 contacts per call (Sonnet needs more reasoning space per contact)
+async function inferPersonasBatch(contacts, peerContext = {}) {
   const personaList = PERSONA_MAP.map(p => `- ${p.value}`).join("\n");
 
-  const contactList = contacts.map((c, i) =>
-    `${i+1}. ID:${c.id} | Title: "${c.jobtitle}" | Company: "${c.companyName || "unknown"}" | Company Type: ${c.company_type || "unknown"}`
-  ).join("\n");
+  // Build rich contact descriptions with all available context
+  const contactList = contacts.map((c, i) => {
+    const emailDomain = c.email ? c.email.split("@")[1] || "" : "";
+    const peers = peerContext[c.companyId] || [];
+    const peerSummary = peers.length > 0
+      ? ` | Peers at same company already tagged: ${peers.slice(0, 5).join(", ")}`
+      : "";
+    return `${i+1}. ID:${c.id}
+   Title: "${c.jobtitle || "unknown"}"
+   Company: "${c.companyName || "unknown"}" (${c.company_type || "unknown type"})
+   Email domain: ${emailDomain || "unknown"}${peerSummary}`;
+  }).join("\n\n");
 
-  const prompt = `You are classifying healthcare CRM contacts into sales personas for CarePathIQ, a post-acute care coordination platform sold to health systems and hospitals.
+  const prompt = `You are an expert healthcare sales intelligence analyst classifying contacts for CarePathIQ.
 
-VALID PERSONAS — use EXACT values:
+ABOUT CAREPATHIQ:
+CarePathIQ sells post-acute care coordination software to health systems and hospitals. 
+Our buyers are health system executives and leaders who make or influence decisions about:
+- Post-acute network management and care transitions
+- Clinical operations, case management, care coordination
+- Population health and value-based care programs
+- Finance, strategy, and technology/innovation
+
+VALID PERSONAS — respond with EXACT values only:
 ${personaList}
-- NON_ICP (use for vendor sales/marketing staff, bedside clinicians, HR, PR, junior admins — but NOT for health system employees with strategic titles)
+- NON_ICP — use for: vendor employees, bedside clinicians (nurses/physicians/therapists at clinical level), HR, PR/communications, recruiters, administrative assistants, lab techs, paramedics, junior program coordinators
 
-CRITICAL CONTEXT RULES:
-- "Sales Executive", "Account Executive", "Client Executive" at a HEALTH SYSTEM = Business Development (they are selling or developing the health system's services/network — they are your buyer)
-- "Sales Executive" at a VENDOR company = NON_ICP
-- "Solutions Consultant", "Analytics Consultant" at a health system = could be Innovation or Strategy
-- "Program Manager" at a health system = could be Population Health, Case Management, or Clinical Operations depending on context
-- "Director of Communications" at a health system = likely Strategy or NON_ICP (not a buyer)
-- "General Manager" at a health system acute care unit = Clinical Operations or Operating Officer
-- "Principal" at a health system = likely Strategy or Business Development
-- "Founder" at a vendor company = NON_ICP
-- "Consultant" roles at health systems = send to Innovation or Strategy if senior, NON_ICP if junior
-- Always prefer a specific functional persona over Executive/Leadership unless the title is purely CEO/President
+CLASSIFICATION RULES:
+1. COMPANY TYPE IS CRITICAL:
+   - At a health system (Parent System/Subsidiary/Medical Group/Independent): classify by functional role
+   - At a Vendor/Supplier: almost always NON_ICP unless they are a C-suite decision maker you might sell TO
+   - Unknown company type: use email domain and company name to infer
 
-CONTACTS:
+2. TITLE INTERPRETATION:
+   - "Sales Executive/Director/VP" AT A HEALTH SYSTEM = Business Development (they sell the health system's services, they are YOUR buyer)
+   - "Account Executive" AT A HEALTH SYSTEM = Business Development (same logic)
+   - "VP of X" = use functional persona for X, not Executive/Leadership
+   - "SVP of X" = same — functional persona
+   - "Director of X" = functional persona for X
+   - "Chief X Officer" = functional persona (CFO=Finance, CNO=Nursing Officer, COO=Operating Officer, CMO=Chief Clinical Officer/Medical Officer, CIO/CTO/CDO=Innovation, CSO=Strategy)
+   - "President" (standalone) = Executive/Leadership
+   - "President of [division/hospital]" = Executive/Leadership
+   - "Vice President" (no function) = send to unclear unless context makes it obvious
+   - "Senior Vice President" (no function) = send to unclear unless context makes it obvious
+
+3. PEER CONTEXT: If contacts at the same company already have assigned personas, use that as signal for what roles exist there and what level of seniority is typical.
+
+4. EMAIL DOMAIN: Can reveal which subsidiary a contact actually works at within a parent system (e.g., aurora.org vs advocatehealth.com both map to Advocate Aurora).
+
+5. WHEN GENUINELY UNCLEAR: Return confidence "low" with your best guess — never return null as persona unless NON_ICP.
+
+CONTACTS TO CLASSIFY:
 ${contactList}
 
-Return ONLY a JSON array:
-[{"id":"contact_id","persona":"Exact Value or NON_ICP","confidence":"high|medium|low","reasoning":"one sentence"}]`;
+Return ONLY a valid JSON array — no markdown, no explanation:
+[
+  {
+    "id": "contact_id_string",
+    "persona": "Exact Persona Value or NON_ICP",
+    "confidence": "high|medium|low",
+    "reasoning": "one sentence explaining why — reference title and company type"
+  }
+]`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2048,
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -496,8 +542,20 @@ Return ONLY a JSON array:
   const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
   const clean = text.replace(/```json|```/g, "").trim();
   const match = clean.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error(`No JSON array: ${clean.slice(0, 200)}`);
-  return JSON.parse(match[0]);
+  if (!match) throw new Error(`No JSON array in response: ${clean.slice(0, 200)}`);
+
+  const parsed = JSON.parse(match[0]);
+
+  // Validate — ensure all returned personas are in the valid list or NON_ICP
+  const validPersonas = new Set([...PERSONA_MAP.map(p => p.value), "NON_ICP"]);
+  return parsed.map(r => {
+    if (!validPersonas.has(r.persona)) {
+      // Sonnet returned an invalid persona — downgrade to low confidence with note
+      return { ...r, persona: null, confidence: "low",
+        reasoning: `Invalid persona "${r.persona}" returned — needs manual review. Original: ${r.reasoning}` };
+    }
+    return r;
+  });
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -516,7 +574,7 @@ export default async (req) => {
     const results    = [];
     const needClaude = [];
 
-    // Pass 1 + 2: cache check, rule match, context-aware classification
+    // Pass 1: cache check + rule-based classification
     for (const contact of batch) {
       if (cache[contact.id] && !forceRefresh) {
         results.push({ ...cache[contact.id], fromCache: true });
@@ -529,7 +587,7 @@ export default async (req) => {
         const r = {
           contactId: contact.id, contactName: contact.name,
           jobtitle: contact.jobtitle, companyName: contact.companyName,
-          company_type: contact.company_type,
+          company_type: contact.company_type, email: contact.email || "",
           persona: null, confidence: classification.confidence,
           isNonICP: true, reasoning: classification.reasoning, method: "rule",
           processedAt: new Date().toISOString(),
@@ -542,7 +600,7 @@ export default async (req) => {
         const r = {
           contactId: contact.id, contactName: contact.name,
           jobtitle: contact.jobtitle, companyName: contact.companyName,
-          company_type: contact.company_type,
+          company_type: contact.company_type, email: contact.email || "",
           persona: classification.persona, confidence: classification.confidence,
           isNonICP: false, reasoning: classification.reasoning, method: "rule",
           processedAt: new Date().toISOString(),
@@ -551,45 +609,84 @@ export default async (req) => {
         continue;
       }
 
-      // Needs Claude
+      // Needs Sonnet
       needClaude.push(contact);
     }
 
-    // Pass 3: Claude batch inference
+    // Pass 2: Sonnet inference with peer context
     if (needClaude.length > 0) {
-      console.log(`[dq-persona] ${needClaude.length} to Claude`);
-      for (let i = 0; i < needClaude.length; i += 20) {
-        const sub = needClaude.slice(i, i + 20);
+      console.log(`[dq-persona] ${needClaude.length} contacts to Sonnet`);
+
+      // Build peer context: for each company in this batch, what personas are already
+      // assigned to OTHER contacts at the same company (from cache or rule results)
+      const peerContext = {};
+      for (const r of [...results, ...Object.values(cache)]) {
+        const compId = r.companyId || r.contactId; // fallback
+        if (r.persona && !r.isNonICP) {
+          if (!peerContext[compId]) peerContext[compId] = [];
+          if (!peerContext[compId].includes(r.persona)) peerContext[compId].push(r.persona);
+        }
+      }
+      // Also build from contacts already in this batch that have companyId
+      for (const c of needClaude) {
+        if (c.companyId) {
+          const existing = results.filter(r => r.companyId === c.companyId && r.persona);
+          if (existing.length) {
+            peerContext[c.companyId] = [...new Set(existing.map(r => r.persona))];
+          }
+        }
+      }
+
+      // Process in sub-batches of 10 for Sonnet (needs more reasoning space)
+      for (let i = 0; i < needClaude.length; i += 10) {
+        const sub = needClaude.slice(i, i + 10);
         try {
-          const inferred  = await inferPersonasBatch(sub);
-          const inferMap  = Object.fromEntries(inferred.map(r => [r.id, r]));
+          const inferred = await inferPersonasBatch(sub, peerContext);
+          const inferMap = Object.fromEntries(inferred.map(r => [String(r.id), r]));
+
           for (const contact of sub) {
-            const inf = inferMap[contact.id] || {};
+            const inf = inferMap[String(contact.id)] || {};
+            const isNonICP = inf.persona === "NON_ICP";
             const r = {
-              contactId: contact.id, contactName: contact.name,
-              jobtitle: contact.jobtitle, companyName: contact.companyName,
+              contactId:   contact.id,
+              contactName: contact.name,
+              jobtitle:    contact.jobtitle,
+              companyName: contact.companyName,
+              companyId:   contact.companyId,
               company_type: contact.company_type,
-              persona:    inf.persona === "NON_ICP" ? null : (inf.persona || null),
-              confidence: inf.confidence || "low",
-              isNonICP:   inf.persona === "NON_ICP",
-              reasoning:  inf.reasoning || "",
-              method:     "claude",
+              email:       contact.email || "",
+              persona:     isNonICP ? null : (inf.persona || null),
+              confidence:  inf.confidence || "low",
+              isNonICP,
+              reasoning:   inf.reasoning || "",
+              method:      "sonnet",
               processedAt: new Date().toISOString(),
             };
-            results.push(r); cache[contact.id] = r;
+            results.push(r);
+            cache[contact.id] = r;
+
+            // Update peer context with this result for subsequent sub-batches
+            if (r.persona && r.companyId) {
+              if (!peerContext[r.companyId]) peerContext[r.companyId] = [];
+              if (!peerContext[r.companyId].includes(r.persona)) {
+                peerContext[r.companyId].push(r.persona);
+              }
+            }
           }
         } catch (err) {
-          console.error(`[dq-persona] sub-batch error:`, err.message);
+          console.error(`[dq-persona] Sonnet sub-batch error:`, err.message);
           for (const contact of sub) {
             results.push({
               contactId: contact.id, contactName: contact.name,
               jobtitle: contact.jobtitle, companyName: contact.companyName,
+              company_type: contact.company_type, email: contact.email || "",
               persona: null, confidence: "error", isNonICP: false,
-              reasoning: `Error: ${err.message}`, method: "error",
+              reasoning: `Sonnet error: ${err.message}`, method: "error",
             });
           }
         }
-        await new Promise(r => setTimeout(r, 300));
+        // Rate limit gap between Sonnet calls
+        await new Promise(r => setTimeout(r, 500));
       }
     }
 
@@ -611,11 +708,13 @@ export default async (req) => {
         processed:      results.length,
         fromCache:      results.filter(r => r.fromCache).length,
         fromRule:       results.filter(r => r.method === "rule").length,
-        fromClaude:     results.filter(r => r.method === "claude").length,
+        fromSonnet:     results.filter(r => r.method === "sonnet").length,
         icpWithPersona: icp.length,
         nonICP:         nonICP.length,
         unclear:        unclear.length,
         highConf:       results.filter(r => r.confidence === "high").length,
+        medConf:        results.filter(r => r.confidence === "medium").length,
+        lowConf:        results.filter(r => r.confidence === "low").length,
       },
     }), { status: 200, headers: CORS });
 
