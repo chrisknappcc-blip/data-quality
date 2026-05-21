@@ -569,7 +569,7 @@ export default async (req) => {
   if (req.method !== "POST")   return new Response("Method not allowed", { status: 405, headers: CORS });
 
   try {
-    const { contacts, batchStart = 0, batchSize = 50, forceRefresh = false } = await req.json();
+    const { contacts, batchStart = 0, batchSize = 10, forceRefresh = false } = await req.json();
     if (!contacts?.length) return new Response(JSON.stringify({ error: "contacts array required" }), { status: 400, headers: CORS });
 
     const cache = forceRefresh ? {} : await loadCache();
@@ -619,79 +619,62 @@ export default async (req) => {
     }
 
     // Pass 2: Sonnet inference with peer context
+    // One Sonnet call per function invocation (batchSize=10, ~4s, within Netlify 26s limit)
     if (needClaude.length > 0) {
       console.log(`[dq-persona] ${needClaude.length} contacts to Sonnet`);
 
-      // Build peer context: for each company in this batch, what personas are already
-      // assigned to OTHER contacts at the same company (from cache or rule results)
+      // Build peer context from cache (contacts already processed in previous batches)
       const peerContext = {};
-      for (const r of [...results, ...Object.values(cache)]) {
-        const compId = r.companyId || r.contactId; // fallback
-        if (r.persona && !r.isNonICP) {
-          if (!peerContext[compId]) peerContext[compId] = [];
-          if (!peerContext[compId].includes(r.persona)) peerContext[compId].push(r.persona);
+      for (const r of Object.values(cache)) {
+        if (r.persona && !r.isNonICP && r.companyId) {
+          if (!peerContext[r.companyId]) peerContext[r.companyId] = [];
+          if (!peerContext[r.companyId].includes(r.persona)) peerContext[r.companyId].push(r.persona);
         }
       }
-      // Also build from contacts already in this batch that have companyId
-      for (const c of needClaude) {
-        if (c.companyId) {
-          const existing = results.filter(r => r.companyId === c.companyId && r.persona);
-          if (existing.length) {
-            peerContext[c.companyId] = [...new Set(existing.map(r => r.persona))];
-          }
+      // Add rule-based results from this batch too
+      for (const r of results) {
+        if (r.persona && !r.isNonICP && r.companyId) {
+          if (!peerContext[r.companyId]) peerContext[r.companyId] = [];
+          if (!peerContext[r.companyId].includes(r.persona)) peerContext[r.companyId].push(r.persona);
         }
       }
 
-      // Process in sub-batches of 10 for Sonnet (needs more reasoning space)
-      for (let i = 0; i < needClaude.length; i += 10) {
-        const sub = needClaude.slice(i, i + 10);
-        try {
-          const inferred = await inferPersonasBatch(sub, peerContext);
-          const inferMap = Object.fromEntries(inferred.map(r => [String(r.id), r]));
+      try {
+        const inferred = await inferPersonasBatch(needClaude, peerContext);
+        const inferMap = Object.fromEntries(inferred.map(r => [String(r.id), r]));
 
-          for (const contact of sub) {
-            const inf = inferMap[String(contact.id)] || {};
-            const isNonICP = inf.persona === "NON_ICP";
-            const r = {
-              contactId:   contact.id,
-              contactName: contact.name,
-              jobtitle:    contact.jobtitle,
-              companyName: contact.companyName,
-              companyId:   contact.companyId,
-              company_type: contact.company_type,
-              email:       contact.email || "",
-              persona:     isNonICP ? null : (inf.persona || null),
-              confidence:  inf.confidence || "low",
-              isNonICP,
-              reasoning:   inf.reasoning || "",
-              method:      "sonnet",
-              processedAt: new Date().toISOString(),
-            };
-            results.push(r);
-            cache[contact.id] = r;
-
-            // Update peer context with this result for subsequent sub-batches
-            if (r.persona && r.companyId) {
-              if (!peerContext[r.companyId]) peerContext[r.companyId] = [];
-              if (!peerContext[r.companyId].includes(r.persona)) {
-                peerContext[r.companyId].push(r.persona);
-              }
-            }
-          }
-        } catch (err) {
-          console.error(`[dq-persona] Sonnet sub-batch error:`, err.message);
-          for (const contact of sub) {
-            results.push({
-              contactId: contact.id, contactName: contact.name,
-              jobtitle: contact.jobtitle, companyName: contact.companyName,
-              company_type: contact.company_type, email: contact.email || "",
-              persona: null, confidence: "error", isNonICP: false,
-              reasoning: `Sonnet error: ${err.message}`, method: "error",
-            });
-          }
+        for (const contact of needClaude) {
+          const inf = inferMap[String(contact.id)] || {};
+          const isNonICP = inf.persona === "NON_ICP";
+          const r = {
+            contactId:    contact.id,
+            contactName:  contact.name,
+            jobtitle:     contact.jobtitle,
+            companyName:  contact.companyName,
+            companyId:    contact.companyId,
+            company_type: contact.company_type,
+            email:        contact.email || "",
+            persona:      isNonICP ? null : (inf.persona || null),
+            confidence:   inf.confidence || "low",
+            isNonICP,
+            reasoning:    inf.reasoning || "",
+            method:       "sonnet",
+            processedAt:  new Date().toISOString(),
+          };
+          results.push(r);
+          cache[contact.id] = r;
         }
-        // Rate limit gap between Sonnet calls
-        await new Promise(r => setTimeout(r, 500));
+      } catch (err) {
+        console.error(`[dq-persona] Sonnet error:`, err.message);
+        for (const contact of needClaude) {
+          results.push({
+            contactId: contact.id, contactName: contact.name,
+            jobtitle: contact.jobtitle, companyName: contact.companyName,
+            company_type: contact.company_type, email: contact.email || "",
+            persona: null, confidence: "error", isNonICP: false,
+            reasoning: `Sonnet error: ${err.message}`, method: "error",
+          });
+        }
       }
     }
 
