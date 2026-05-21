@@ -46,7 +46,7 @@ const PERSONA_MAP = [
 
   { value: "Chief Clinical Officer", hints: [
     "chief clinical", "chief medical officer", "chief medical",
-    "cmo", "cco", "associate chief medical", "deputy chief medical",
+    "cmo", "associate chief medical", "deputy chief medical",
     "vice president and chief medical", "system chief medical",
     "vice chair of clinical", "vice chair clinical",
   ]},
@@ -67,7 +67,7 @@ const PERSONA_MAP = [
     "chief financial", "revenue cycle", "finance director", "finance officer",
     "cfo", "vp finance", "vp of finance", "vice president finance", "vice president of finance",
     "svp finance", "director of finance", "director finance",
-    "director accounts payable", "director collections",
+    "director accounts payable", "director of accounts payable", "director collections",
     "director revenue cycle", "regional director revenue cycle",
     "director of accounting", "director billing", "director coding",
     "director budget", "director fiscal", "director treasury", "controller",
@@ -86,12 +86,12 @@ const PERSONA_MAP = [
 
   { value: "Strategy", hints: [
     "chief strategy", "strategic planning", "business transformation",
-    "cso", "vp strategy", "vp of strategy", "vp, strategy",
+    "cso", "chief growth and strategy", "vp strategy", "vp of strategy", "vp, strategy",
     "vice president strategy", "vice president, strategy", "vice president of strategy",
     "svp strategy", "senior vp strategy", "director of strategy", "director strategy",
     "senior director strategy", "director strategic planning",
-    "senior director strategic insights",
-    "vp market research and strategy", "vice president market research",
+    "senior director strategic insights", "senior director of strategic insights",
+    "vp market research and strategy", "vice president market research", "vice president of market research",
     "svp governance", "senior director transformation",
     "director of transformation", "director market strategy",
     "director payer strategy", "division senior vp market",
@@ -100,9 +100,9 @@ const PERSONA_MAP = [
 
   { value: "Innovation", hints: [
     "chief digital", "chief data officer", "chief information officer",
-    "chief technology", "digital transformation", "data science",
+    "chief technology", "chief healthcare technology", "digital transformation", "data science",
     "health informatics", "clinical informatics",
-    "cdio", "ciso",
+    "cdio", "ciso", "chief information security", "information security officer",
     "vp digital", "vp of digital", "vice president digital",
     "svp digital", "senior vp digital", "senior vice president digital",
     "vp technology", "vp of technology", "vice president technology",
@@ -116,12 +116,12 @@ const PERSONA_MAP = [
     "director data analytics", "director of data analytics",
     "director data science", "director of data science",
     "senior director data", "senior director analytics",
-    "head of data science", "head data science",
-    "vp digital product", "associate director digital", "associate vp digital",
-    "senior director of digital", "director ai",
+    "head of data science", "head data science", "healthcare data", "director of healthcare data",
+    "vp digital product", "associate director digital", "associate vp digital", "associate vice president of digital", "associate vice president digital",
+    "senior director of digital", "director ai", "director of ai", "ai/ml", "machine learning director",
     "principal technology architect", "technology architect",
     "executive director digital", "director digital platforms",
-    "hit strategist", "senior medical director of health informatics",
+    "hit strategist", "health information technology strategist", "senior medical director of health informatics",
     "vp of digital product engineering", "svp digital solutions",
     "vice president of design and innovation",
     "svp experience design", "chief product officer",
@@ -198,13 +198,13 @@ const PERSONA_MAP = [
     "vice president strategic partnerships",
     "director provider network", "director of provider network",
     "director network development", "director referral development",
-    "senior director business solutions", "director business solutions",
-    "executive director business solutions",
+    "senior director business solutions", "senior director of business solutions", "director business solutions",
+    "executive director business solutions", "executive director of business solutions",
     "vp of health plan business", "vice president of health plan business",
-    "head of commercialization", "director commercialization",
-    "senior director value creation", "director value creation",
+    "head of commercialization", "director commercialization", "pharmacy pricing", "director of pharmacy pricing",
+    "senior director value creation", "senior director of value creation", "director value creation", "director of value creation",
     "vice president of development", "vp development",
-    "avp strategic client growth",
+    "avp strategic client growth", "avp - strategic client growth",
     "director market access",
     "regional director",
   ]},
@@ -220,7 +220,6 @@ const PERSONA_MAP = [
     "health plan director", "director health plan",
     "vp health plan", "vice president health plan",
     "director risk adjustment",
-    "director of value", "director value",
     "svp government programs", "senior vp government programs",
     "vp of market access", "vice president of market access",
     "division senior vp market corporate responsibility",
@@ -253,13 +252,14 @@ const PERSONA_MAP = [
     "executive director ancillary", "executive director of ancillary",
     "director supply chain", "director of supply chain", "supply chain director",
     "director laboratory", "director of laboratory", "lab director",
-    "director pharmacy", "director of pharmacy", "pharmacy director",
+    "pharmacy director", "director of pharmacy operations", "director pharmacy services",
     "director clinic operations", "director, clinic operations",
     "director operations", "director, operations", "director of operations",
     "assistant vp patient care", "assistant vice president patient care",
     "director patient care", "director of patient care",
     "director clinical nutrition",
-    "director transportation",
+    "director transportation", "transfer center", "patient logistics", "patient transport",
+    "general manager of acute care", "acute care manager",
   ]},
 
   { value: "Emergency Department", hints: [
@@ -274,7 +274,7 @@ const PERSONA_MAP = [
 
   { value: "Medical Information", hints: [
     "health information management", "him director", "director him",
-    "health information technology", "medical informatics",
+    "health information management director", "medical informatics",
   ]},
 
   { value: "Ambulatory/Urgent Care", hints: [
@@ -372,7 +372,9 @@ const HINT_EXCLUSIONS = {
 
 function ruleMatch(title) {
   if (!title) return null;
-  const t = title.toLowerCase();
+  // Normalize: remove commas so "Vice President, Operations" matches "vice president operations"
+  // Also normalize multiple spaces
+  const t = title.toLowerCase().replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
   let bestMatch = null;
   let bestScore = 0;
 
