@@ -86,7 +86,8 @@ const PERSONA_MAP = [
 
   { value: "Strategy", hints: [
     "chief strategy", "strategic planning", "business transformation",
-    "cso", "vp strategy", "vp of strategy", "vice president strategy", "vice president of strategy",
+    "cso", "vp strategy", "vp of strategy", "vp, strategy",
+    "vice president strategy", "vice president, strategy", "vice president of strategy",
     "svp strategy", "senior vp strategy", "director of strategy", "director strategy",
     "senior director strategy", "director strategic planning",
     "senior director strategic insights",
@@ -141,7 +142,8 @@ const PERSONA_MAP = [
     "quality officer", "patient safety", "quality improvement",
     "quality and compliance", "quality compliance",
     "chief quality", "cqo",
-    "vp quality", "vp of quality", "vice president quality",
+    "vp quality", "vp of quality", "vp, quality",
+    "vice president quality", "vice president, quality", "vice president of quality",
     "director quality", "director of quality", "quality director",
     "managing director quality", "managing director, quality",
     "executive director quality", "executive director of quality",
@@ -361,6 +363,13 @@ async function saveCache(cache) {
 }
 
 // ─── Rule-based persona matching ─────────────────────────────────────────────
+// Hints that should NOT match if preceded by these prefixes
+// key = hint, value = array of prefixes that disqualify it
+const HINT_EXCLUSIONS = {
+  "president":    ["vice president", "vice-president", "assistant to the president"],
+  "chief medical": ["assistant chief medical", "associate chief medical"],
+};
+
 function ruleMatch(title) {
   if (!title) return null;
   const t = title.toLowerCase();
@@ -369,10 +378,15 @@ function ruleMatch(title) {
 
   for (const persona of PERSONA_MAP) {
     for (const hint of persona.hints) {
-      if (t.includes(hint) && hint.length > bestScore) {
-        bestScore = hint.length;
-        bestMatch = persona.value;
-      }
+      if (!t.includes(hint)) continue;
+      if (hint.length <= bestScore) continue;
+
+      // Check exclusions — some hints shouldn't fire if preceded by disqualifying prefix
+      const exclusions = HINT_EXCLUSIONS[hint];
+      if (exclusions && exclusions.some(exc => t.includes(exc))) continue;
+
+      bestScore = hint.length;
+      bestMatch = persona.value;
     }
   }
 
