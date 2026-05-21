@@ -664,7 +664,11 @@ function PersonaPanel({ scanResult, onPersonaResults, personaDone, setPersonaDon
 
     try {
       while (batchStart < contacts.length) {
-        const batchNum = Math.floor(batchStart/batchSize)+1; const totalBatches = Math.ceil(contacts.length/batchSize); setProgress(`Batch ${batchNum} of ${totalBatches} — contacts ${batchStart+1}–${Math.min(batchStart+batchSize, contacts.length)} of ${contacts.length}…`)
+        const batchNum = Math.floor(batchStart/batchSize)+1
+        const totalBatches = Math.ceil(contacts.length/batchSize)
+        const remaining = totalBatches - batchNum
+        const estMins = Math.ceil((remaining * 13) / 60)
+        setProgress(`Batch ${batchNum} of ${totalBatches} — ${contacts.length - (batchStart+batchSize)} contacts remaining · ~${estMins} min left…`)
         const res = await fetch('/api/dq-persona', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -675,7 +679,9 @@ function PersonaPanel({ scanResult, onPersonaResults, personaDone, setPersonaDon
         allResults.push(...(d.results || []))
         if (!d.hasMore) break
         batchStart = d.nextBatch
-        await new Promise(r => setTimeout(r, 500))
+        // Rate limit: new API accounts = 5 req/min. Wait 13s between batches.
+        // TODO: remove this delay once Care Continuity upgrades to a paid tier
+        await new Promise(r => setTimeout(r, 13000))
       }
 
       setResults(allResults)
