@@ -630,16 +630,18 @@ function PersonaPanel({ scanResult, onPersonaResults }) {
     (scanResult?.companies || []).map(c => [String(c.id), c.company_type || ''])
   )
 
-  // Deduplicate — one entry per contact, with company_type from company lookup
+  // Deduplicate — one entry per contact, with all context fields Sonnet needs
   const contactsSeen = new Set()
   const contacts = (scanResult?.phase3?.issues || [])
     .filter(i => i.type === 'MISSING_PERSONA' && !contactsSeen.has(i.contactId) && contactsSeen.add(i.contactId))
     .map(i => ({
-      id: i.contactId,
-      name: i.contactName,
-      jobtitle: i.contactTitle || '',
-      companyName: i.companyName,
+      id:           i.contactId,
+      name:         i.contactName,
+      jobtitle:     i.contactTitle || '',
+      companyName:  i.companyName,
+      companyId:    String(i.companyId || ''),
       company_type: companyTypeMap[String(i.companyId)] || '',
+      email:        i.contactEmail || '',
     }))
 
   const runInference = async (forceRefresh = false) => {
@@ -741,9 +743,9 @@ function PersonaPanel({ scanResult, onPersonaResults }) {
                   { label:'Persona Assigned', value:icp.length,    color:C.green },
                   { label:'Non-ICP (excluded)', value:nonICP.length, color:C.amber },
                   { label:'Unclear',           value:unclear.length, color:C.sub },
-                  { label:'From Cache',        value:results.filter(r=>r.fromCache).length, color:C.muted },
-                  { label:'Rule-Based',        value:results.filter(r=>r.method==='rule').length, color:C.accent },
-                  { label:'Claude Inferred',   value:results.filter(r=>r.method==='claude').length, color:C.purple },
+                  { label:'High Confidence', value:results.filter(r=>r.confidence==='high').length,   color:C.green },
+                  { label:'Med Confidence',  value:results.filter(r=>r.confidence==='medium').length, color:C.amber },
+                  { label:'Low/Review',      value:results.filter(r=>r.confidence==='low').length,    color:C.red },
                 ]} />
 
                 <Callout type="info">
@@ -806,7 +808,7 @@ function PersonaPanel({ scanResult, onPersonaResults }) {
                           </td>
                           <td style={{ padding:'7px 12px' }}>
                             <span style={{ fontSize:10, color:C.muted }}>
-                              {r.method==='rule'?'Rule':'rule'===r.method?'Rule':r.method==='claude'?'AI':'cache'===r.method?'Cache':r.method}
+                              {r.method==='rule'?'Rule':r.method==='sonnet'?'Sonnet':r.method==='cache'||r.fromCache?'Cache':'—'}
                             </span>
                           </td>
                         </tr>
