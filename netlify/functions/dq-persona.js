@@ -29,7 +29,7 @@ const CACHE_BLOB = "dq-persona-cache.json";
 const PERSONA_MAP = [
 
   { value: "Nursing Officer", hints: [
-    "nursing officer", "chief nurse", "chief nursing", "nursing services", "vp of nursing services",
+    "nursing officer", "nurse executive", "nursing executive", "chief nurse", "chief nursing", " cno", "& cno", "nursing services", "vp of nursing services",
     "cno", "vp nursing", "vp of nursing", "vice president nursing", "vice president of nursing",
     "svp nursing", "svp chief nursing", "senior vice president nursing", "senior vp nursing",
     "assistant chief nursing", "associate chief nursing", "deputy chief nursing",
@@ -45,8 +45,11 @@ const PERSONA_MAP = [
   ]},
 
   { value: "Chief Clinical Officer", hints: [
-    "chief clinical", "chief medical officer", "chief medical",
-    "cmo", "associate chief medical", "deputy chief medical",
+    "chief clinical officer", "chief clinical", "chief medical officer", "chief medical",
+    " cmo", "& cmo",
+    "evp chief clinical officer", "evp chief medical officer",
+    "executive vp chief clinical", "executive vp chief medical",
+    "executive vice president chief clinical", "executive vice president chief medical", "associate chief medical", "deputy chief medical",
     "vice president and chief medical", "system chief medical",
     "vice chair of clinical", "vice chair clinical",
   ]},
@@ -376,7 +379,7 @@ function ruleMatch(title) {
   if (!title) return null;
   // Normalize: remove commas so "Vice President, Operations" matches "vice president operations"
   // Also normalize multiple spaces
-  const t = title.toLowerCase().replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+  const t = title.toLowerCase().replace(/,/g, ' ').replace(/&/g, ' ').replace(/\s+/g, ' ').trim();
   let bestMatch = null;
   let bestScore = 0;
 
