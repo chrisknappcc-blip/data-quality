@@ -1292,7 +1292,258 @@ function ExportPanel({ scanResult, personaResults = [], enrichDone = false, pers
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
-export default function App() {
+export default // ─── Rep Sync Panel ──────────────────────────────────────────────────────────
+function RepSyncPanel() {
+  const [file, setFile]         = React.useState(null)
+  const [rows, setRows]         = React.useState([])
+  const [parsing, setParsing]   = React.useState(false)
+  const [running, setRunning]   = React.useState(false)
+  const [result, setResult]     = React.useState(null)
+  const [error, setError]       = React.useState(null)
+  const [csvOutput, setCsvOutput] = React.useState(null)
+
+  const parseCSV = (text) => {
+    const lines = text.split(/\r?\n/).filter(l => l.trim())
+    if (lines.length < 2) return []
+    // Parse header
+    const header = parseCSVLine(lines[0])
+    return lines.slice(1).map(line => {
+      const vals = parseCSVLine(line)
+      const obj = {}
+      header.forEach((h, i) => { obj[h] = vals[i] || '' })
+      return obj
+    }).filter(r => Object.values(r).some(v => v))
+  }
+
+  const parseCSVLine = (line) => {
+    const result = []
+    let current = ''
+    let inQuotes = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === '"') {
+        if (inQuotes && line[i+1] === '"') { current += '"'; i++ }
+        else inQuotes = !inQuotes
+      } else if (ch === ',' && !inQuotes) {
+        result.push(current.trim())
+        current = ''
+      } else {
+        current += ch
+      }
+    }
+    result.push(current.trim())
+    return result
+  }
+
+  const handleFile = (e) => {
+    const f = e.target.files[0]
+    if (!f) return
+    setFile(f); setResult(null); setError(null); setCsvOutput(null)
+    setParsing(true)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const parsed = parseCSV(ev.target.result)
+      setRows(parsed)
+      setParsing(false)
+    }
+    reader.readAsText(f)
+  }
+
+  const runSync = async () => {
+    if (!rows.length) return
+    setRunning(true); setError(null); setResult(null)
+    try {
+      // Process in chunks of 5000 to avoid request size limits
+      const CHUNK = 5000
+      let allPreviews = []
+      let finalStats = { total: 0, toUpdate: 0, unchanged: 0, dnc: 0, noRep: 0 }
+      let allCsvRows = []
+
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const chunk = rows.slice(i, i + CHUNK)
+        const res = await fetch('/api/dq-rep-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: chunk })
+        })
+        if (!res.ok) throw new Error(`Server error: ${res.status}`)
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+
+        // Accumulate stats
+        finalStats.total     += data.stats.total
+        finalStats.toUpdate  += data.stats.toUpdate
+        finalStats.unchanged += data.stats.unchanged
+        finalStats.dnc       += data.stats.dnc
+        finalStats.noRep     += data.stats.noRep
+        allPreviews = [...allPreviews, ...(data.preview || [])]
+
+        // Accumulate CSV (skip header after first chunk)
+        const csvLines = data.csv.split('\n')
+        if (allCsvRows.length === 0) {
+          allCsvRows = csvLines // include header
+        } else {
+          allCsvRows = [...allCsvRows, ...csvLines.slice(1)] // skip header
+        }
+      }
+
+      setResult({ stats: finalStats, preview: allPreviews.slice(0, 20) })
+      setCsvOutput(allCsvRows.join('\n'))
+    } catch(e) {
+      setError(e.message)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const downloadCSV = () => {
+    if (!csvOutput) return
+    const blob = new Blob([csvOutput], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `UPLOAD-TO-HUBSPOT-primary-rep-${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+  }
+
+  return (
+    <div style={{ padding: '24px', maxWidth: 900 }}>
+      <CardHead>Primary Outreach Rep — Full CRM Sync</CardHead>
+
+      <div style={{ marginBottom: 20, fontSize: 13, color: '#aaa', lineHeight: 1.6 }}>
+        Export your contacts from HubSpot, upload the CSV here, and download an
+        import-ready file that sets <code style={{ color: '#4ade80' }}>primary_outreach_rep</code> for
+        every contact. No API rate limits — processes 67k+ contacts in seconds.
+      </div>
+
+      {/* Step 1 — Export instructions */}
+      <div style={{ marginBottom: 20, padding: '14px 16px', background: '#1a1a1a',
+        border: '1px solid #2a2a2a', borderRadius: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', marginBottom: 10 }}>
+          Step 1 — Export from HubSpot
+        </div>
+        <div style={{ fontSize: 12, color: '#888', lineHeight: 1.8 }}>
+          Go to <strong style={{ color: '#ccc' }}>HubSpot → Contacts → All contacts → Export</strong> and
+          include these columns:
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 24px',
+          marginTop: 8, fontSize: 11, color: '#aaa', fontFamily: 'monospace' }}>
+          {['Record ID', 'First Name', 'Last Name', 'Email',
+            'Contact Owner', 'Assigned BDR', 'Primary Outreach Rep',
+            'Last Contacted', 'Last Activity Date',
+            'Existing Customer', 'Email Opt Out'].map(f => (
+            <div key={f} style={{ padding: '2px 0', borderBottom: '1px solid #222' }}>
+              • {f}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Step 2 — Upload */}
+      <div style={{ marginBottom: 20, padding: '14px 16px', background: '#1a1a1a',
+        border: '1px solid #2a2a2a', borderRadius: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', marginBottom: 10 }}>
+          Step 2 — Upload CSV
+        </div>
+        <input type="file" accept=".csv" onChange={handleFile}
+          style={{ fontSize: 12, color: '#aaa', cursor: 'pointer' }} />
+        {parsing && <div style={{ fontSize: 12, color: '#888', marginTop: 8 }}>Parsing…</div>}
+        {rows.length > 0 && !parsing && (
+          <div style={{ fontSize: 12, color: '#4ade80', marginTop: 8 }}>
+            ✓ {rows.length.toLocaleString()} contacts loaded
+            {rows[0] && (
+              <span style={{ color: '#666', marginLeft: 8 }}>
+                Columns: {Object.keys(rows[0]).join(', ')}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Step 3 — Process */}
+      {rows.length > 0 && (
+        <div style={{ marginBottom: 20, padding: '14px 16px', background: '#1a1a1a',
+          border: '1px solid #2a2a2a', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', marginBottom: 10 }}>
+            Step 3 — Process & Download
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={runSync} disabled={running}
+              style={{ padding: '8px 18px', background: running ? '#333' : '#4ade80',
+                color: running ? '#666' : '#000', border: 'none', borderRadius: 6,
+                fontSize: 12, fontWeight: 700, cursor: running ? 'not-allowed' : 'pointer' }}>
+              {running ? '⟳ Processing…' : 'Process CSV'}
+            </button>
+            {result && (
+              <button onClick={downloadCSV}
+                style={{ padding: '8px 18px', background: '#4ade80', color: '#000',
+                  border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                ⬇ Download Import CSV ({result.stats.toUpdate.toLocaleString()} contacts)
+              </button>
+            )}
+          </div>
+          {error && (
+            <div style={{ marginTop: 10, fontSize: 12, color: '#f87171' }}>✗ {error}</div>
+          )}
+        </div>
+      )}
+
+      {/* Results */}
+      {result && (
+        <div style={{ padding: '14px 16px', background: '#1a1a1a',
+          border: '1px solid #2a2a2a', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#fff', marginBottom: 12 }}>
+            Results
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 16 }}>
+            {[
+              { label: 'Total processed', value: result.stats.total, color: '#fff' },
+              { label: 'To update',       value: result.stats.toUpdate,  color: '#4ade80' },
+              { label: 'Unchanged',       value: result.stats.unchanged, color: '#888' },
+              { label: 'DNC skipped',     value: result.stats.dnc,       color: '#f59e0b' },
+              { label: 'No valid rep',    value: result.stats.noRep,     color: '#888' },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ padding: '10px 12px', background: '#111',
+                border: '1px solid #2a2a2a', borderRadius: 6, textAlign: 'center' }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color }}>{value.toLocaleString()}</div>
+                <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#ccc', marginBottom: 8 }}>
+            Preview (first 20 updates)
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #2a2a2a' }}>
+                {['Record ID', 'New Primary Rep'].map(h => (
+                  <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: '#666',
+                    fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {result.preview.map((r, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #1a1a1a' }}>
+                  <td style={{ padding: '5px 8px', color: '#666', fontFamily: 'monospace' }}>{r.id}</td>
+                  <td style={{ padding: '5px 8px', color: '#4ade80' }}>{r.rep}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ marginTop: 12, fontSize: 11, color: '#666' }}>
+            Import the downloaded CSV into HubSpot:
+            <strong style={{ color: '#ccc' }}> Contacts → Import → Contacts → Update existing contacts</strong>.
+            Column headers auto-map — no manual mapping needed.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function App() {
   const { isLoaded, isSignedIn, userId } = useAuth()
   const [scanning, setScanning]         = useState(false)
   const [scanResult, setScanResult]     = useState(null)
@@ -1353,6 +1604,7 @@ export default function App() {
     { key:'4',  label:'Stale',       count:(p4?.neverContacted||0)+(p4?.stale1Year||0) },
     { key:'persona',     label:'Persona AI' },
     { key:'export',      label:'Export' },
+    { key:'rep-sync',    label:'Rep Sync' },
     { key:'corrections', label:'Corrections' },
   ]
 
@@ -1500,6 +1752,7 @@ export default function App() {
 
           {/* Corrections accessible even before scanning */}
           {!scanResult && !scanning && activeStep === 'corrections' && <CorrectionsPanel />}
+      {activeStep === 'rep-sync' && <RepSyncPanel />}
 
           {scanning && (
             <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
@@ -1550,6 +1803,7 @@ export default function App() {
               {activeStep === '4' && <Step4 data={scanResult.phase4} />}
               {activeStep === 'persona' && <PersonaPanel scanResult={scanResult} onPersonaResults={setPersonaResults} personaDone={personaDone} setPersonaDone={setPersonaDone} />}
               {activeStep === 'export'      && <ExportPanel scanResult={scanResult} personaResults={personaResults} enrichDone={enrichDone} personaDone={personaDone} />}
+              {activeStep === 'rep-sync'    && <RepSyncPanel />}
               {activeStep === 'corrections' && <CorrectionsPanel />}
             </>
           )}
