@@ -1291,8 +1291,7 @@ function ExportPanel({ scanResult, personaResults = [], enrichDone = false, pers
   )
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
-export default // ─── Rep Sync Panel ──────────────────────────────────────────────────────────
+// ─── Rep Sync Panel ──────────────────────────────────────────────────────────
 function RepSyncPanel() {
   const [file, setFile]         = useState(null)
   const [rows, setRows]         = useState([])
@@ -1543,7 +1542,7 @@ function RepSyncPanel() {
   )
 }
 
-function App() {
+export default function App() {
   const { isLoaded, isSignedIn, userId } = useAuth()
   const [scanning, setScanning]         = useState(false)
   const [scanResult, setScanResult]     = useState(null)
