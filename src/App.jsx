@@ -1752,8 +1752,7 @@ function App() {
 
           {/* Corrections accessible even before scanning */}
           {!scanResult && !scanning && activeStep === 'corrections' && <CorrectionsPanel />}
-      {activeStep === 'rep-sync' && <RepSyncPanel />}
-
+          {!scanResult && !scanning && activeStep === 'rep-sync' && <RepSyncPanel />}
           {scanning && (
             <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
               justifyContent:'center', flex:1, gap:14, paddingTop:60 }}>
