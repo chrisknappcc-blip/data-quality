@@ -1294,13 +1294,13 @@ function ExportPanel({ scanResult, personaResults = [], enrichDone = false, pers
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default // ─── Rep Sync Panel ──────────────────────────────────────────────────────────
 function RepSyncPanel() {
-  const [file, setFile]         = React.useState(null)
-  const [rows, setRows]         = React.useState([])
-  const [parsing, setParsing]   = React.useState(false)
-  const [running, setRunning]   = React.useState(false)
-  const [result, setResult]     = React.useState(null)
-  const [error, setError]       = React.useState(null)
-  const [csvOutput, setCsvOutput] = React.useState(null)
+  const [file, setFile]         = useState(null)
+  const [rows, setRows]         = useState([])
+  const [parsing, setParsing]   = useState(false)
+  const [running, setRunning]   = useState(false)
+  const [result, setResult]     = useState(null)
+  const [error, setError]       = useState(null)
+  const [csvOutput, setCsvOutput] = useState(null)
 
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).filter(l => l.trim())
